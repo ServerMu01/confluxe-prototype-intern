@@ -1,13 +1,47 @@
-const rawBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+function resolveRawBaseUrl() {
+  const fromEnv =
+    import.meta.env.VITE_API_BASE_URL ||
+    import.meta.env.VITE_BACKEND_URL ||
+    import.meta.env.BACKEND_URL;
+
+  if (fromEnv && String(fromEnv).trim()) {
+    return String(fromEnv).trim();
+  }
+
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    return window.location.origin;
+  }
+
+  return 'http://localhost:8000';
+}
+
+const rawBaseUrl = resolveRawBaseUrl();
 const DEFAULT_REQUEST_TIMEOUT_MS = 10000;
 const UPLOAD_REQUEST_TIMEOUT_MS = 20000;
 
 function normalizeBaseUrl(value) {
-  const trimmed = value.trim().replace(/\/+$/, '');
-  if (trimmed.endsWith('/api/v1')) {
-    return trimmed;
+  let normalized = value.trim().replace(/\/+$/, '');
+
+  if (!/^https?:\/\//i.test(normalized)) {
+    normalized = `https://${normalized}`;
   }
-  return `${trimmed}/api/v1`;
+
+  // When frontend is served over HTTPS, upgrade HTTP API URL for non-local targets.
+  if (typeof window !== 'undefined' && window.location.protocol === 'https:' && normalized.startsWith('http://')) {
+    const isLocalTarget =
+      normalized.includes('://localhost') ||
+      normalized.includes('://127.0.0.1') ||
+      normalized.includes('://0.0.0.0');
+
+    if (!isLocalTarget) {
+      normalized = normalized.replace(/^http:\/\//i, 'https://');
+    }
+  }
+
+  if (normalized.endsWith('/api/v1')) {
+    return normalized;
+  }
+  return `${normalized}/api/v1`;
 }
 
 const API_BASE_URL = normalizeBaseUrl(rawBaseUrl);
@@ -53,6 +87,11 @@ async function request(path, options = {}) {
     );
   } catch (error) {
     if (error instanceof Error) {
+      if (error.name === 'TypeError') {
+        throw new Error(
+          `Failed to fetch from ${API_BASE_URL}. Check backend reachability, FRONTEND_ORIGINS CORS config, and HTTPS/HTTP mismatch.`
+        );
+      }
       throw error;
     }
     throw new Error('Unable to connect to backend service.');

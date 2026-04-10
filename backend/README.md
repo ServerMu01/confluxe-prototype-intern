@@ -34,6 +34,7 @@ uvicorn app.main:app --reload --port 8000
 - `CATALOG_CANCEL_CHECK_EVERY` (default: `5`; cancellation check frequency)
 - `CATALOG_UPLOAD_DIRECTORY` (default: `./storage/catalog_uploads`; persisted upload files for durable jobs)
 - `FRONTEND_ORIGINS` (comma-separated CORS origins)
+- `FRONTEND_ORIGIN_REGEX` (optional regex for dynamic origins, e.g. `https://.*\\.vercel\\.app`)
 - `MONGODB_URI` (default: `mongodb://localhost:27017`)
 - `MONGODB_DATABASE` (default: `confluxe`)
 - `MONGODB_SERVER_SELECTION_TIMEOUT_MS` (default: `5000`; startup DB connect timeout)
@@ -45,6 +46,12 @@ uvicorn app.main:app --reload --port 8000
 	- `/health` returns `{"status":"degraded","db_available":false}`
 	- DB-dependent endpoints (`/catalogs/*`, `/copilot/*`, and `/intelligence/products`) return `503` with a clear message.
 	- Trend endpoints continue to work using trend providers/fallbacks.
+
+### CORS / Frontend Deployment Note
+
+- For fixed frontend domains, set `FRONTEND_ORIGINS` to a comma-separated list.
+- For preview/dynamic domains, set `FRONTEND_ORIGIN_REGEX`.
+- Example Railway + Vercel: `FRONTEND_ORIGIN_REGEX=https://.*\\.vercel\\.app`
 
 ## Upload Durability
 
