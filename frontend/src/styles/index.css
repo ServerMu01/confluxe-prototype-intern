@@ -1,0 +1,255 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  html {
+    scrollbar-gutter: stable;
+  }
+
+  body {
+    margin: 0;
+  }
+}
+
+@layer components {
+  .confluxe-select {
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    border: 1px solid #e5e2d9;
+    border-radius: 0.375rem;
+    background-color: #fffdf8;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23555555' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.6rem center;
+    background-size: 0.7rem;
+    min-height: 2.25rem;
+    padding: 0.45rem 2rem 0.45rem 0.75rem;
+    font-family: inherit;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    color: #111111;
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
+    transition: border-color 160ms ease, background-color 160ms ease;
+  }
+
+  .confluxe-select:hover {
+    border-color: #c8c1b2;
+    background-color: #fffaf0;
+  }
+
+  .confluxe-select option {
+    color: #111111;
+    background-color: #ffffff;
+  }
+
+  .confluxe-select:focus {
+    border-color: #111111;
+    outline: none;
+    box-shadow: 0 0 0 1px #111111;
+  }
+
+  .confluxe-select:disabled {
+    cursor: not-allowed;
+    color: #888888;
+    background-color: #f2f0ea;
+    box-shadow: none;
+  }
+
+  .confluxe-select-inline {
+    border: 0;
+    background-color: transparent;
+    background-image: none;
+    box-shadow: none;
+    min-height: auto;
+    padding: 0;
+  }
+
+  .confluxe-select-inline:focus {
+    box-shadow: none;
+  }
+
+  .confluxe-alert {
+    border: 1px solid #e5e2d9;
+    background: #faf9f5;
+    border-radius: 0.375rem;
+    padding: 0.75rem 0.9rem;
+    font-size: 0.875rem;
+    line-height: 1.45;
+    color: #555555;
+  }
+
+  .confluxe-alert-error {
+    border-color: rgb(227 41 41 / 0.2);
+    background: rgb(227 41 41 / 0.1);
+    color: #b01c1c;
+  }
+
+  .confluxe-alert-success {
+    border-color: rgb(42 107 61 / 0.2);
+    background: rgb(42 107 61 / 0.1);
+    color: #2a6b3d;
+  }
+
+  .confluxe-alert-info {
+    border-color: rgb(17 17 17 / 0.14);
+    background: rgb(17 17 17 / 0.06);
+    color: #2c2c2c;
+  }
+
+  .confluxe-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgb(17 17 17 / 0.45);
+    backdrop-filter: blur(2px);
+    z-index: 80;
+  }
+
+  .confluxe-modal {
+    border: 1px solid #e5e2d9;
+    background: #fffdf8;
+    box-shadow: 0 24px 60px rgb(0 0 0 / 0.2);
+    border-radius: 0.375rem;
+  }
+}
+
+@layer utilities {
+  @keyframes confluxe-fade-in {
+    from {
+      opacity: 0;
+    }
+
+    to {
+      opacity: 1;
+    }
+  }
+
+  @keyframes confluxe-slide-in-right {
+    from {
+      opacity: 0;
+      transform: translateX(2rem);
+    }
+
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+
+  @keyframes confluxe-fade-up {
+    from {
+      opacity: 0;
+      transform: translateY(1rem);
+    }
+
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes confluxe-scale-in {
+    from {
+      opacity: 0;
+      transform: scale(0.96);
+    }
+
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+
+  @keyframes confluxe-pan {
+    from {
+      transform: translateX(-12%);
+      opacity: 0.85;
+    }
+
+    to {
+      transform: translateX(8%);
+      opacity: 1;
+    }
+  }
+
+  .animate-in {
+    animation-duration: 500ms;
+    animation-fill-mode: both;
+    animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .fade-in {
+    animation-name: confluxe-fade-in;
+  }
+
+  .slide-in-from-right-8 {
+    animation-name: confluxe-slide-in-right;
+  }
+
+  .screen-enter {
+    animation: confluxe-fade-up 520ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  .fade-up {
+    animation: confluxe-fade-up 560ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  .scale-in {
+    animation: confluxe-scale-in 420ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  .stagger-item {
+    opacity: 0;
+    animation: confluxe-fade-up 620ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  .animate-pan {
+    animation: confluxe-pan 10s linear infinite alternate;
+  }
+
+  .delay-1 {
+    animation-delay: 70ms;
+  }
+
+  .delay-2 {
+    animation-delay: 140ms;
+  }
+
+  .delay-3 {
+    animation-delay: 210ms;
+  }
+
+  .delay-4 {
+    animation-delay: 280ms;
+  }
+
+  .delay-5 {
+    animation-delay: 350ms;
+  }
+
+  .delay-6 {
+    animation-delay: 420ms;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .animate-in,
+    .fade-in,
+    .slide-in-from-right-8,
+    .screen-enter,
+    .fade-up,
+    .scale-in,
+    .stagger-item,
+    .animate-pan {
+      animation: none !important;
+      opacity: 1 !important;
+      transform: none !important;
+    }
+  }
+}
