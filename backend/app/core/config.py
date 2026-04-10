@@ -39,11 +39,40 @@ class Settings(BaseSettings):
         default='http://localhost:5173,http://localhost:5174',
         alias='FRONTEND_ORIGINS'
     )
+    frontend_origin_regex_raw: str | None = Field(default=None, alias='FRONTEND_ORIGIN_REGEX')
+
+    @staticmethod
+    def _normalize_origin(value: str) -> str:
+        normalized = value.strip().strip('"').strip("'")
+        if normalized == '*':
+            return '*'
+
+        if normalized.endswith('/'):
+            normalized = normalized.rstrip('/')
+
+        if '://' in normalized:
+            scheme, remainder = normalized.split('://', 1)
+            normalized = f"{scheme.lower()}://{remainder}"
+
+        return normalized
 
     @property
     def frontend_origins(self) -> list[str]:
-        origins = [origin.strip() for origin in self.frontend_origins_raw.split(',')]
-        return [origin for origin in origins if origin]
+        raw_values = self.frontend_origins_raw.replace('\n', ',')
+        origins = [self._normalize_origin(origin) for origin in raw_values.split(',')]
+        return [origin for origin in origins if origin and origin != '*']
+
+    @property
+    def frontend_origin_regex(self) -> str | None:
+        if self.frontend_origin_regex_raw and self.frontend_origin_regex_raw.strip():
+            return self.frontend_origin_regex_raw.strip().strip('"').strip("'")
+
+        raw_values = self.frontend_origins_raw.replace('\n', ',')
+        origins = [self._normalize_origin(origin) for origin in raw_values.split(',') if origin.strip()]
+        if '*' in origins:
+            return r'https?://.*'
+
+        return None
 
     model_config = SettingsConfigDict(
         env_file='.env',
