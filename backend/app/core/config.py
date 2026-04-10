@@ -30,6 +30,10 @@ class Settings(BaseSettings):
 
     mongodb_uri: str = Field(default='mongodb://localhost:27017', alias='MONGODB_URI')
     mongodb_database: str = Field(default='confluxe', alias='MONGODB_DATABASE')
+    mongodb_server_selection_timeout_ms: int = Field(
+        default=5000,
+        alias='MONGODB_SERVER_SELECTION_TIMEOUT_MS'
+    )
     usd_inr_rate: float = Field(default=83.0, alias='USD_INR_RATE')
     frontend_origins_raw: str = Field(
         default='http://localhost:5173,http://localhost:5174',

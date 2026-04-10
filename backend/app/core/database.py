@@ -1,22 +1,42 @@
 from __future__ import annotations
 
+import logging
+
 from pymongo import ASCENDING, DESCENDING, MongoClient
 from pymongo.database import Database
+from pymongo.errors import PyMongoError
 
 from app.core.config import settings
 
 
+logger = logging.getLogger(__name__)
+
+
 mongo_client: MongoClient | None = None
 mongo_db: Database | None = None
+mongo_available = False
 
 
 def init_db() -> None:
-    global mongo_client, mongo_db
+    global mongo_client, mongo_db, mongo_available
 
     if mongo_client is None:
-        mongo_client = MongoClient(settings.mongodb_uri)
+        mongo_client = MongoClient(
+            settings.mongodb_uri,
+            serverSelectionTimeoutMS=settings.mongodb_server_selection_timeout_ms
+        )
         mongo_db = mongo_client[settings.mongodb_database]
-        _ensure_indexes()
+
+        try:
+            _ensure_indexes()
+            mongo_available = True
+        except PyMongoError as exc:
+            mongo_available = False
+            logger.warning(
+                'MongoDB unavailable during startup. API will run in degraded mode. '
+                'Set MONGODB_URI to a reachable database. Error: %s',
+                exc
+            )
 
 
 def get_database() -> Database:
@@ -25,14 +45,19 @@ def get_database() -> Database:
     return mongo_db
 
 
+def is_database_available() -> bool:
+    return mongo_available
+
+
 def close_db() -> None:
-    global mongo_client, mongo_db
+    global mongo_client, mongo_db, mongo_available
 
     if mongo_client is not None:
         mongo_client.close()
 
     mongo_client = None
     mongo_db = None
+    mongo_available = False
 
 
 def _ensure_indexes() -> None:

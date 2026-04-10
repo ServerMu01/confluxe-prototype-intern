@@ -36,6 +36,15 @@ uvicorn app.main:app --reload --port 8000
 - `FRONTEND_ORIGINS` (comma-separated CORS origins)
 - `MONGODB_URI` (default: `mongodb://localhost:27017`)
 - `MONGODB_DATABASE` (default: `confluxe`)
+- `MONGODB_SERVER_SELECTION_TIMEOUT_MS` (default: `5000`; startup DB connect timeout)
+
+### MongoDB Availability Behavior
+
+- If MongoDB is reachable at startup, indexes are ensured and all APIs are fully available.
+- If MongoDB is not reachable, backend starts in **degraded mode**:
+	- `/health` returns `{"status":"degraded","db_available":false}`
+	- DB-dependent endpoints (`/catalogs/*`, `/copilot/*`, and `/intelligence/products`) return `503` with a clear message.
+	- Trend endpoints continue to work using trend providers/fallbacks.
 
 ## Upload Durability
 

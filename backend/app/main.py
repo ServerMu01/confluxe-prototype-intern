@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.agents.pipeline import ConfluxePipeline
 from app.api.routers import catalogs, copilot, intelligence
 from app.core.config import settings
-from app.core.database import close_db, get_database, init_db
+from app.core.database import close_db, get_database, init_db, is_database_available
 from app.core.exceptions import register_exception_handlers
 from app.services.catalog_service import CatalogService
 from app.services.copilot_service import CopilotService
@@ -33,6 +33,7 @@ def on_startup() -> None:
     app.state.trend_service = trend_service
     app.state.catalog_service = CatalogService(database, pipeline)
     app.state.copilot_service = CopilotService(database)
+    app.state.db_available = is_database_available()
 
 
 @app.on_event('shutdown')
@@ -41,8 +42,12 @@ def on_shutdown() -> None:
 
 
 @app.get('/health')
-def health() -> dict[str, str]:
-    return {'status': 'ok'}
+def health() -> dict[str, str | bool]:
+    db_available = bool(getattr(app.state, 'db_available', False))
+    return {
+        'status': 'ok' if db_available else 'degraded',
+        'db_available': db_available
+    }
 
 
 app.include_router(catalogs.router, prefix=settings.api_prefix, tags=['catalogs'])
