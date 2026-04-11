@@ -8,6 +8,10 @@ const TIME_WINDOWS = [
   { id: '12M', months: 12 }
 ];
 
+function getWindowMonths(windowId) {
+  return TIME_WINDOWS.find((window) => window.id === windowId)?.months ?? 12;
+}
+
 const STATUS_META = {
   Surging: {
     confidence: 92,
@@ -111,8 +115,8 @@ function keywordBadgeStyle(growth) {
   return 'text-[#111111] bg-[#F2F0EA]';
 }
 
-function buildFallbackSeries(activeTrend) {
-  const labels = getRollingMonthLabels(12);
+function buildFallbackSeries(activeTrend, monthCount = 12) {
+  const labels = getRollingMonthLabels(monthCount);
   const base = (activeTrend?.momentum_score || 5) * 10;
 
   return labels.map((month, index) => {
@@ -152,9 +156,9 @@ function normalizeMonthLabel(rawValue, fallbackMonth) {
   return fallbackMonth;
 }
 
-function normalizeTimelinePoints(rawTimeline, activeTrend) {
-  const fallback = buildFallbackSeries(activeTrend);
-  const rollingMonths = getRollingMonthLabels(12);
+function normalizeTimelinePoints(rawTimeline, activeTrend, monthCount = 12) {
+  const fallback = buildFallbackSeries(activeTrend, monthCount);
+  const rollingMonths = getRollingMonthLabels(monthCount);
 
   if (!Array.isArray(rawTimeline) || rawTimeline.length === 0) {
     return fallback;
@@ -385,13 +389,14 @@ export default function TrendsView() {
     }
 
     let active = true;
+    const monthWindow = getWindowMonths(selectedWindow);
 
     async function loadTrendDetails() {
       try {
         setIsDetailLoading(true);
         const [keywords, timeline] = await Promise.all([
           listTrendKeywords(activeTrend.category, 20),
-          getTrendTimeline(activeTrend.category, 12)
+          getTrendTimeline(activeTrend.category, monthWindow)
         ]);
 
         if (!active) {
@@ -417,7 +422,7 @@ export default function TrendsView() {
     return () => {
       active = false;
     };
-  }, [activeTrend?.category]);
+  }, [activeTrend?.category, selectedWindow]);
 
   const filteredKeywords = useMemo(() => {
     const normalizedQuery = keywordQuery.trim().toLowerCase();
@@ -430,15 +435,14 @@ export default function TrendsView() {
   const topKeyword = filteredKeywords[0];
 
   const chartSeries = useMemo(() => {
-    const monthWindow = TIME_WINDOWS.find((window) => window.id === selectedWindow)?.months ?? 12;
-    const source = normalizeTimelinePoints(timelinePoints, activeTrend);
-    const clipped = source.slice(-monthWindow);
+    const monthWindow = getWindowMonths(selectedWindow);
+    const source = normalizeTimelinePoints(timelinePoints, activeTrend, monthWindow);
 
-    if (clipped.length >= 2) {
-      return clipped;
+    if (source.length >= 2) {
+      return source;
     }
 
-    return buildFallbackSeries(activeTrend).slice(-monthWindow);
+    return buildFallbackSeries(activeTrend, monthWindow);
   }, [activeTrend, selectedWindow, timelinePoints]);
 
   const lineChart = useMemo(() => buildLineGraphModel(chartSeries), [chartSeries]);

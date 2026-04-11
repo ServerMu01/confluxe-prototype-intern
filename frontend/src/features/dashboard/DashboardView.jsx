@@ -4,6 +4,8 @@ import { listIntelligenceProducts } from '@/lib/api';
 
 const DEMAND_COLORS = ['bg-[#E32929]', 'bg-[#111111]', 'bg-[#8C827A]', 'bg-[#D1CFC7]', 'bg-[#2A6B3D]'];
 const RECOMMENDATIONS_PER_PAGE = 12;
+const ACTION_FILTERS = ['ALL', 'LAUNCH', 'TEST', 'AVOID'];
+const DEMAND_FILTERS = ['ALL', 'High', 'Medium', 'Low'];
 
 function formatInr(value) {
   return new Intl.NumberFormat('en-IN', {
@@ -62,6 +64,10 @@ export default function DashboardView({ onGenerateReport, selectedCatalogJobId }
   const [currentPage, setCurrentPage] = useState(1);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
+  const [recommendationQuery, setRecommendationQuery] = useState('');
+  const [actionFilter, setActionFilter] = useState('ALL');
+  const [categoryFilter, setCategoryFilter] = useState('ALL');
+  const [demandFilter, setDemandFilter] = useState('ALL');
 
   useEffect(() => {
     let active = true;
@@ -104,16 +110,38 @@ export default function DashboardView({ onGenerateReport, selectedCatalogJobId }
     };
   }, [selectedCatalogJobId]);
 
+  const availableCategories = useMemo(
+    () => ['ALL', ...new Set(products.map((product) => product.category))],
+    [products]
+  );
+
+  const filteredProducts = useMemo(() => {
+    const normalizedQuery = recommendationQuery.trim().toLowerCase();
+
+    return products.filter((product) => {
+      const matchesQuery =
+        !normalizedQuery ||
+        product.name.toLowerCase().includes(normalizedQuery) ||
+        product.brand.toLowerCase().includes(normalizedQuery) ||
+        product.category.toLowerCase().includes(normalizedQuery);
+      const matchesAction = actionFilter === 'ALL' || product.action === actionFilter;
+      const matchesCategory = categoryFilter === 'ALL' || product.category === categoryFilter;
+      const matchesDemand = demandFilter === 'ALL' || product.demand === demandFilter;
+
+      return matchesQuery && matchesAction && matchesCategory && matchesDemand;
+    });
+  }, [products, recommendationQuery, actionFilter, categoryFilter, demandFilter]);
+
   const selectedProduct = useMemo(() => {
-    if (!products.length) {
+    if (!filteredProducts.length) {
       return null;
     }
-    return products.find((item) => item.id === selectedProductId) || products[0];
-  }, [products, selectedProductId]);
+    return filteredProducts.find((item) => item.id === selectedProductId) || filteredProducts[0];
+  }, [filteredProducts, selectedProductId]);
 
   const totalPages = useMemo(
-    () => Math.max(1, Math.ceil(products.length / RECOMMENDATIONS_PER_PAGE)),
-    [products.length]
+    () => Math.max(1, Math.ceil(filteredProducts.length / RECOMMENDATIONS_PER_PAGE)),
+    [filteredProducts.length]
   );
 
   const pageStartIndex = useMemo(
@@ -122,8 +150,8 @@ export default function DashboardView({ onGenerateReport, selectedCatalogJobId }
   );
 
   const paginatedProducts = useMemo(
-    () => products.slice(pageStartIndex, pageStartIndex + RECOMMENDATIONS_PER_PAGE),
-    [products, pageStartIndex]
+    () => filteredProducts.slice(pageStartIndex, pageStartIndex + RECOMMENDATIONS_PER_PAGE),
+    [filteredProducts, pageStartIndex]
   );
 
   const paginationPages = useMemo(
@@ -138,14 +166,24 @@ export default function DashboardView({ onGenerateReport, selectedCatalogJobId }
   }, [currentPage, totalPages]);
 
   useEffect(() => {
-    if (!paginatedProducts.length) {
+    setCurrentPage(1);
+  }, [recommendationQuery, actionFilter, categoryFilter, demandFilter]);
+
+  useEffect(() => {
+    if (!filteredProducts.length) {
+      setSelectedProductId('');
       return;
     }
 
-    if (!paginatedProducts.some((product) => product.id === selectedProductId)) {
+    if (!filteredProducts.some((product) => product.id === selectedProductId)) {
+      setSelectedProductId(filteredProducts[0].id);
+      return;
+    }
+
+    if (paginatedProducts.length && !paginatedProducts.some((product) => product.id === selectedProductId)) {
       setSelectedProductId(paginatedProducts[0].id);
     }
-  }, [paginatedProducts, selectedProductId]);
+  }, [filteredProducts, paginatedProducts, selectedProductId]);
 
   const kpis = useMemo(() => {
     const total = products.length;
@@ -282,19 +320,83 @@ export default function DashboardView({ onGenerateReport, selectedCatalogJobId }
                   Live Market Mapping
                 </p>
               </div>
-              <div className="flex w-full gap-3 sm:w-auto">
-                <button
-                  type="button"
-                  className="flex flex-1 items-center justify-center gap-2 border border-transparent px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-[#888888] transition-all hover:border-[#E5E2D9] hover:bg-[#F2F0EA] hover:text-[#111111] sm:flex-none"
+              <div className="grid w-full grid-cols-1 gap-2 sm:w-auto sm:grid-cols-2 lg:grid-cols-4">
+                <label className="relative block">
+                  <Search
+                    size={12}
+                    className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#888888]"
+                  />
+                  <input
+                    type="text"
+                    value={recommendationQuery}
+                    onChange={(event) => setRecommendationQuery(event.target.value)}
+                    placeholder="Search product or brand"
+                    className="w-full border border-[#E5E2D9] py-2 pl-8 pr-3 text-xs text-[#111111] placeholder-[#888888] focus:border-[#111111] focus:outline-none"
+                  />
+                </label>
+
+                <select
+                  value={actionFilter}
+                  onChange={(event) => setActionFilter(event.target.value)}
+                  className="confluxe-select w-full py-2 text-[10px] font-bold uppercase tracking-widest"
                 >
-                  <Search size={12} />
-                  Search
-                </button>
+                  {ACTION_FILTERS.map((option) => (
+                    <option key={option} value={option}>
+                      {option === 'ALL' ? 'All Actions' : option}
+                    </option>
+                  ))}
+                </select>
+
+                <select
+                  value={categoryFilter}
+                  onChange={(event) => setCategoryFilter(event.target.value)}
+                  className="confluxe-select w-full py-2 text-[10px] font-bold uppercase tracking-widest"
+                >
+                  {availableCategories.map((option) => (
+                    <option key={option} value={option}>
+                      {option === 'ALL' ? 'All Categories' : option}
+                    </option>
+                  ))}
+                </select>
+
+                <div className="flex gap-2">
+                  <select
+                    value={demandFilter}
+                    onChange={(event) => setDemandFilter(event.target.value)}
+                    className="confluxe-select w-full py-2 text-[10px] font-bold uppercase tracking-widest"
+                  >
+                    {DEMAND_FILTERS.map((option) => (
+                      <option key={option} value={option}>
+                        {option === 'ALL' ? 'All Demand' : option}
+                      </option>
+                    ))}
+                  </select>
+
+                  {(recommendationQuery || actionFilter !== 'ALL' || categoryFilter !== 'ALL' || demandFilter !== 'ALL') && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setRecommendationQuery('');
+                        setActionFilter('ALL');
+                        setCategoryFilter('ALL');
+                        setDemandFilter('ALL');
+                      }}
+                      className="border border-[#E5E2D9] px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-[#555555] transition hover:border-[#111111] hover:text-[#111111]"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
 
             <div className="space-y-3 p-4 md:hidden">
-              {paginatedProducts.map((product, index) => {
+              {paginatedProducts.length === 0 ? (
+                <div className="border border-[#E5E2D9] bg-[#FAF9F5] p-4 text-center text-xs text-[#555555]">
+                  No recommendations match the current filters.
+                </div>
+              ) : (
+                paginatedProducts.map((product, index) => {
                 const isSelected = selectedProduct?.id === product.id;
                 const displayIndex = pageStartIndex + index + 1;
 
@@ -351,7 +453,8 @@ export default function DashboardView({ onGenerateReport, selectedCatalogJobId }
                     </div>
                   </button>
                 );
-              })}
+                })
+              )}
             </div>
 
             <div className="hidden w-full overflow-x-auto lg:block">
@@ -366,10 +469,17 @@ export default function DashboardView({ onGenerateReport, selectedCatalogJobId }
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#E5E2D9] bg-white">
-                  {paginatedProducts.map((product, index) => {
-                    const displayIndex = pageStartIndex + index + 1;
+                  {paginatedProducts.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="px-6 py-10 text-center text-sm text-[#555555]">
+                        No recommendations match the current filters.
+                      </td>
+                    </tr>
+                  ) : (
+                    paginatedProducts.map((product, index) => {
+                      const displayIndex = pageStartIndex + index + 1;
 
-                    return (
+                      return (
                     <tr
                       key={product.id}
                       onClick={() => setSelectedProductId(product.id)}
@@ -462,16 +572,17 @@ export default function DashboardView({ onGenerateReport, selectedCatalogJobId }
                         </span>
                       </td>
                     </tr>
-                  );
-                  })}
+                    );
+                    })
+                  )}
                 </tbody>
               </table>
             </div>
 
-            {products.length > RECOMMENDATIONS_PER_PAGE && (
+            {filteredProducts.length > RECOMMENDATIONS_PER_PAGE && (
               <div className="flex flex-col gap-3 border-t border-[#E5E2D9] bg-[#FAF9F5] px-4 py-4 sm:flex-row sm:items-center sm:justify-between md:px-6">
                 <p className="text-[10px] font-bold uppercase tracking-widest text-[#888888]">
-                  Page {currentPage} of {totalPages} · Showing {paginatedProducts.length} of {products.length}
+                  Page {currentPage} of {totalPages} · Showing {paginatedProducts.length} of {filteredProducts.length} filtered ({products.length} total)
                 </p>
 
                 <div className="flex items-center gap-1.5">
