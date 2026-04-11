@@ -9,6 +9,7 @@ import requests
 from pytrends.request import TrendReq
 
 from app.core.config import settings
+from app.core.exceptions import TrendDataUnavailableError
 from app.models.schemas import TrendDashboardItem, TrendKeywordItem, TrendSignal, TrendTimelinePoint
 
 
@@ -32,55 +33,20 @@ class TrendService:
             'Footwear': 'sneakers india',
             'Accessories': 'fashion accessories india'
         }
-        self._profiles: dict[str, dict[str, int | float | str]] = {
-            'Streetwear': {
-                'search_volume': 245000,
-                'growth_percentage': 45.0,
-                'momentum_score': 9,
-                'top_region': 'Delhi NCR'
-            },
-            'Activewear': {
-                'search_volume': 180000,
-                'growth_percentage': 22.0,
-                'momentum_score': 8,
-                'top_region': 'Bangalore'
-            },
-            'Formalwear': {
-                'search_volume': 95000,
-                'growth_percentage': -5.0,
-                'momentum_score': 4,
-                'top_region': 'Mumbai'
-            },
-            'Outerwear': {
-                'search_volume': 12000,
-                'growth_percentage': -40.0,
-                'momentum_score': 2,
-                'top_region': 'Shimla'
-            },
-            'Footwear': {
-                'search_volume': 132000,
-                'growth_percentage': 18.0,
-                'momentum_score': 7,
-                'top_region': 'Hyderabad'
-            },
-            'Accessories': {
-                'search_volume': 86000,
-                'growth_percentage': 11.0,
-                'momentum_score': 6,
-                'top_region': 'Pune'
-            }
-        }
 
     def get_trend_signal(self, category: str) -> TrendSignal:
-        snapshot = self._load_snapshot(category)
+        snapshot = self._load_snapshot(category, allow_remote=True)
         return snapshot.signal
 
     def get_macro_trends(self) -> list[TrendDashboardItem]:
         items: list[TrendDashboardItem] = []
 
         for category in ('Streetwear', 'Activewear', 'Formalwear', 'Outerwear', 'Footwear', 'Accessories'):
-            # Keep dashboard responses fast; avoid blocking on remote providers when cache is cold.
-            snapshot = self._load_snapshot(category, allow_remote=False)
+            try:
+                snapshot = self._load_snapshot(category, allow_remote=True)
+            except TrendDataUnavailableError:
+                continue
+
             signal = snapshot.signal
             status = self._status_from_signal(signal)
 
@@ -96,14 +62,17 @@ class TrendService:
                 )
             )
 
+        if not items:
+            raise TrendDataUnavailableError('No live trend signals are currently available from providers.')
+
         return items
 
     def get_rising_keywords(self, category: str, limit: int = 10) -> list[TrendKeywordItem]:
-        snapshot = self._load_snapshot(category)
+        snapshot = self._load_snapshot(category, allow_remote=True)
         return snapshot.keywords[: max(1, min(50, limit))]
 
     def get_timeline(self, category: str, months: int = 12) -> list[TrendTimelinePoint]:
-        snapshot = self._load_snapshot(category)
+        snapshot = self._load_snapshot(category, allow_remote=True)
         return snapshot.timeline[-max(1, min(12, months)) :]
 
     def _load_snapshot(self, category: str, allow_remote: bool = True) -> TrendSnapshot:
@@ -116,14 +85,17 @@ class TrendService:
             if age_seconds <= settings.trend_cache_ttl_seconds:
                 return cached
 
-        if not allow_remote:
-            snapshot = self._build_deterministic_snapshot(normalized_category)
-        else:
+        snapshot: TrendSnapshot | None = None
+
+        if allow_remote:
             snapshot = self._build_apify_snapshot(normalized_category)
             if not snapshot:
                 snapshot = self._build_pytrends_snapshot(normalized_category)
-            if not snapshot:
-                snapshot = self._build_deterministic_snapshot(normalized_category)
+
+        if not snapshot:
+            raise TrendDataUnavailableError(
+                f'Live trend data is unavailable for {normalized_category}. Check provider connectivity and credentials.'
+            )
 
         self._cache[normalized_category] = snapshot
         return snapshot
@@ -171,8 +143,6 @@ class TrendService:
 
             top_region = self._extract_apify_top_region(apify_items)
             keywords = self._extract_apify_keywords(apify_items)
-            if not keywords:
-                keywords = self._default_keywords_for_category(category)
 
             signal = self._signal_from_timeline(category, timeline, top_region)
 
@@ -214,8 +184,6 @@ class TrendService:
                     top_region = str(non_zero[query].idxmax())
 
             keywords = self._extract_pytrends_keywords(client.related_queries(), query)
-            if not keywords:
-                keywords = self._default_keywords_for_category(category)
 
             signal = self._signal_from_timeline(category, timeline, top_region)
 
@@ -228,38 +196,6 @@ class TrendService:
             )
         except Exception:
             return None
-
-    def _build_deterministic_snapshot(self, category: str) -> TrendSnapshot:
-        profile = self._profiles.get(category, self._profiles['Formalwear'])
-        variation_seed = sum(ord(char) for char in category)
-        offset = (variation_seed % 7) - 3
-
-        base_value = int(profile['momentum_score']) * 10
-        growth_factor = float(profile['growth_percentage']) / 28.0
-
-        timeline: list[TrendTimelinePoint] = []
-        anchor = datetime.now(timezone.utc)
-        for index in range(12):
-            month_index = (anchor.month - 1) - (11 - index)
-            year = anchor.year + (month_index // 12)
-            month = (month_index % 12) + 1
-            label = datetime(year, month, 1, tzinfo=timezone.utc).strftime('%b')
-
-            seasonal_swing = ((index % 3) - 1) * 4
-            drift = (index - 5) * growth_factor
-            value = int(max(4, min(100, round(base_value + seasonal_swing + drift + offset))))
-            timeline.append(TrendTimelinePoint(month=label, value=value))
-
-        top_region = str(profile['top_region'])
-        signal = self._signal_from_timeline(category, timeline, top_region)
-
-        return TrendSnapshot(
-            signal=signal,
-            timeline=timeline,
-            keywords=self._default_keywords_for_category(category),
-            provider='deterministic_fallback',
-            fetched_at=datetime.now(timezone.utc)
-        )
 
     def _call_apify_actor(self, actor_input: dict[str, Any]) -> list[dict[str, Any]]:
         actor_id = quote(settings.apify_google_trends_actor_id, safe='')
@@ -444,14 +380,7 @@ class TrendService:
 
     def _signal_from_timeline(self, category: str, timeline: list[TrendTimelinePoint], top_region: str) -> TrendSignal:
         if not timeline:
-            profile = self._profiles.get(category, self._profiles['Formalwear'])
-            return TrendSignal(
-                category=category,
-                search_volume=int(profile['search_volume']),
-                growth_percentage=float(profile['growth_percentage']),
-                momentum_score=int(profile['momentum_score']),
-                top_region=str(profile['top_region'])
-            )
+            raise TrendDataUnavailableError(f'Unable to derive trend signal for {category}; timeline data is empty.')
 
         first_value = max(1, timeline[0].value)
         last_value = timeline[-1].value
@@ -471,24 +400,6 @@ class TrendService:
             momentum_score=momentum_score,
             top_region=top_region
         )
-
-    def _default_keywords_for_category(self, category: str) -> list[TrendKeywordItem]:
-        base_terms = {
-            'Streetwear': ['oversized tee india', 'baggy cargo pants', 'street style men'],
-            'Activewear': ['gym co-ord women', 'seamless yoga set', 'running tights men'],
-            'Formalwear': ['office shirts men', 'formal trouser women', 'blazer slim fit'],
-            'Outerwear': ['light jacket india', 'winter hoodie men', 'puffer jacket women'],
-            'Footwear': ['chunky sneakers india', 'running shoes women', 'casual sneakers men'],
-            'Accessories': ['crossbody bags india', 'minimal watches', 'bucket hats india']
-        }
-
-        terms = base_terms.get(category, ['fashion trends india', 'apparel demand india', 'top style searches'])
-        growth_values = ['Breakout', '+124%', '+78%']
-
-        return [
-            TrendKeywordItem(term=term, growth=growth_values[index % len(growth_values)])
-            for index, term in enumerate(terms)
-        ]
 
     @staticmethod
     def _extract_numeric_value(candidate: Any) -> int | None:

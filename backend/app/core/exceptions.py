@@ -21,6 +21,12 @@ class ResourceNotFoundError(Exception):
         super().__init__(f'{resource} with id {identifier} was not found.')
 
 
+class TrendDataUnavailableError(Exception):
+    def __init__(self, message: str = 'Live trend data is currently unavailable from configured providers.') -> None:
+        self.message = message
+        super().__init__(self.message)
+
+
 async def csv_parsing_exception_handler(_: Request, exc: CSVParsingError) -> JSONResponse:
     return JSONResponse(
         status_code=status.HTTP_400_BAD_REQUEST,
@@ -42,7 +48,15 @@ async def not_found_exception_handler(_: Request, exc: ResourceNotFoundError) ->
     )
 
 
+async def trend_unavailable_exception_handler(_: Request, exc: TrendDataUnavailableError) -> JSONResponse:
+    return JSONResponse(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        content={'detail': exc.message}
+    )
+
+
 def register_exception_handlers(app) -> None:
     app.add_exception_handler(CSVParsingError, csv_parsing_exception_handler)
     app.add_exception_handler(LLMTimeoutError, llm_timeout_exception_handler)
     app.add_exception_handler(ResourceNotFoundError, not_found_exception_handler)
+    app.add_exception_handler(TrendDataUnavailableError, trend_unavailable_exception_handler)

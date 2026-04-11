@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { ArrowUpRight, Filter, MapPin, Network, Search, TrendingDown, TrendingUp } from 'lucide-react';
 import { getTrendTimeline, listTrendKeywords, listTrendSignals } from '@/lib/api';
 
+const FULL_TIMELINE_MONTHS = 12;
 const TIME_WINDOWS = [
   { id: '3M', months: 3 },
   { id: '6M', months: 6 },
@@ -31,66 +32,9 @@ const STATUS_META = {
   }
 };
 
-const INSIGHT_COPY = {
-  Streetwear:
-    'Streetwear is scaling beyond metros, with social-first style cycles compressing from quarterly to monthly adoption in Tier 2 hubs.',
-  Activewear:
-    'Activewear is benefiting from hybrid fitness behavior and creator-led wellness content, producing consistent monthly search intent.',
-  Formalwear:
-    'Formalwear demand is flattening as officewear becomes event-based, making narrower capsule drops more effective than broad rollouts.',
-  Outerwear:
-    'Outerwear remains weather-bound; targeted launch windows and regional depth outperform always-on nationwide inventory strategies.'
-};
-
-const SOURCE_INDEX = {
-  Streetwear: ['Google_Trends_IN_Oct.csv', 'Myntra_Q3_Sales_Report.pdf', 'Vogue_India_Streetwear_Blog.html'],
-  Activewear: ['YouTube_Fitness_Fashion_Insights.csv', 'Nykaa_Fitwear_Search_Log.json', 'Athleisure_Conversion_Study.pdf'],
-  Formalwear: ['LinkedIn_Office_Style_Pulse.csv', 'Wedding_Season_Demand_Report.pdf', 'Retail_Formals_Basket_Study.xlsx'],
-  Outerwear: ['IMD_Regional_Weather_Trends.csv', 'Winterwear_Search_Timeline.json', 'Regional_Climate_Demand_Map.pdf']
-};
-
-const FALLBACK_TREND_DASHBOARD = [
-  {
-    category: 'Streetwear',
-    volume: '245K',
-    growth: '+45%',
-    region: 'Delhi NCR',
-    status: 'Surging',
-    momentum_score: 9,
-    provider: 'offline_fallback'
-  },
-  {
-    category: 'Activewear',
-    volume: '180K',
-    growth: '+22%',
-    region: 'Bangalore',
-    status: 'Surging',
-    momentum_score: 8,
-    provider: 'offline_fallback'
-  },
-  {
-    category: 'Formalwear',
-    volume: '95K',
-    growth: '-5%',
-    region: 'Mumbai',
-    status: 'Steady',
-    momentum_score: 4,
-    provider: 'offline_fallback'
-  },
-  {
-    category: 'Outerwear',
-    volume: '12K',
-    growth: '-40%',
-    region: 'Shimla',
-    status: 'Declining',
-    momentum_score: 2,
-    provider: 'offline_fallback'
-  }
-];
-
 function formatProvider(provider) {
   if (!provider) {
-    return 'Live Trend Feed';
+    return 'Trend Provider';
   }
 
   if (provider === 'apify_google_trends') {
@@ -99,7 +43,27 @@ function formatProvider(provider) {
   if (provider === 'pytrends') {
     return 'Google Trends (PyTrends)';
   }
-  return 'Fallback Trend Model';
+  return provider.replace(/[_-]+/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function buildInsightNarrative(activeTrend) {
+  const growthValue = parseGrowthValue(activeTrend.growth);
+  const directionText = growthValue >= 0 ? 'accelerating' : 'cooling';
+
+  return (
+    `${activeTrend.category} demand is ${directionText} in ${activeTrend.region} with ` +
+    `${activeTrend.growth} year-over-year movement and a momentum score of ${activeTrend.momentum_score}/10. ` +
+    `Use this live demand curve to size buys and adjust pricing cadence weekly.`
+  );
+}
+
+function buildSourceList(activeTrend) {
+  const providerLabel = formatProvider(activeTrend.provider);
+  return [
+    `${providerLabel} timeline feed (${FULL_TIMELINE_MONTHS} months)`,
+    `${activeTrend.category} related query stream`,
+    `${activeTrend.region} regional interest heatmap`
+  ];
 }
 
 function keywordBadgeStyle(growth) {
@@ -111,31 +75,6 @@ function keywordBadgeStyle(growth) {
     return 'text-[#2A6B3D] bg-[#2A6B3D]/10';
   }
   return 'text-[#111111] bg-[#F2F0EA]';
-}
-
-function buildFallbackSeries(activeTrend, monthCount = 12) {
-  const labels = getRollingMonthLabels(monthCount);
-  const base = (activeTrend?.momentum_score || 5) * 10;
-
-  return labels.map((month, index) => {
-    const swing = ((index % 4) - 1.5) * 5;
-    return {
-      month,
-      value: Math.max(8, Math.min(100, Math.round(base + swing)))
-    };
-  });
-}
-
-function getRollingMonthLabels(monthCount = 12) {
-  const labels = [];
-  const anchor = new Date();
-
-  for (let offset = monthCount - 1; offset >= 0; offset -= 1) {
-    const monthDate = new Date(anchor.getFullYear(), anchor.getMonth() - offset, 1);
-    labels.push(monthDate.toLocaleString('en-US', { month: 'short' }));
-  }
-
-  return labels;
 }
 
 function normalizeMonthLabel(rawValue, fallbackMonth) {
@@ -158,44 +97,33 @@ function normalizeMonthLabel(rawValue, fallbackMonth) {
   return fallbackMonth;
 }
 
-function normalizeTimelinePoints(rawTimeline, activeTrend, monthCount = 12) {
-  const fallback = buildFallbackSeries(activeTrend, monthCount);
-
+function normalizeTimelinePoints(rawTimeline) {
   if (!Array.isArray(rawTimeline) || rawTimeline.length === 0) {
-    return fallback;
+    return [];
   }
 
   const normalized = rawTimeline
     .map((point, index) => {
-      const fallbackPoint = fallback[index % fallback.length];
       const month = normalizeMonthLabel(
         point?.month ?? point?.label ?? point?.date ?? point?.period,
-        fallbackPoint.month
+        `M${index + 1}`
       );
       const rawValue = point?.value ?? point?.interest ?? point?.score ?? point?.signal;
       const numericValue = Number(rawValue);
-      const value = Number.isFinite(numericValue)
-        ? Math.max(0, Math.min(100, Math.round(numericValue)))
-        : fallbackPoint.value;
+      if (!Number.isFinite(numericValue)) {
+        return null;
+      }
+
+      const value = Math.max(0, Math.min(100, Math.round(numericValue)));
 
       return {
         month,
         value
       };
     })
-    .filter((point) => typeof point.month === 'string' && point.month.trim() !== '');
+    .filter((point) => point && typeof point.month === 'string' && point.month.trim() !== '');
 
-  if (normalized.length >= monthCount) {
-    return normalized.slice(-monthCount);
-  }
-
-  if (normalized.length >= 2) {
-    const missing = monthCount - normalized.length;
-    const paddedPrefix = fallback.slice(0, missing);
-    return [...paddedPrefix, ...normalized];
-  }
-
-  return fallback;
+  return normalized.slice(-FULL_TIMELINE_MONTHS);
 }
 
 function buildLineGraphModel(series) {
@@ -329,17 +257,28 @@ export default function TrendsView() {
           return;
         }
 
-        const dataToUse = trendData.length > 0 ? trendData : FALLBACK_TREND_DASHBOARD;
-        setMarketTrends(dataToUse);
-        setSelectedCategory((previous) => previous || dataToUse[0].category);
+        if (!Array.isArray(trendData) || trendData.length === 0) {
+          setMarketTrends([]);
+          setSelectedCategory('');
+          setError('No live trend data was returned by providers.');
+          return;
+        }
+
+        setMarketTrends(trendData);
+        setSelectedCategory((previous) => {
+          if (previous && trendData.some((trend) => trend.category === previous)) {
+            return previous;
+          }
+          return trendData[0].category;
+        });
       } catch (loadError) {
         if (active) {
-          setMarketTrends(FALLBACK_TREND_DASHBOARD);
-          setSelectedCategory((previous) => previous || FALLBACK_TREND_DASHBOARD[0].category);
+          setMarketTrends([]);
+          setSelectedCategory('');
           setError(
             loadError.message
-              ? `${loadError.message} Showing modelled trend signals instead.`
-              : 'Live trend signals unavailable. Showing modelled trend signals instead.'
+              ? loadError.message
+              : 'Live trend signals unavailable right now.'
           );
         }
       } finally {
@@ -386,14 +325,13 @@ export default function TrendsView() {
     }
 
     let active = true;
-    const monthWindow = getWindowMonths(selectedWindow);
 
     async function loadTrendDetails() {
       try {
         setIsDetailLoading(true);
         const [keywords, timeline] = await Promise.all([
           listTrendKeywords(activeTrend.category, 20),
-          getTrendTimeline(activeTrend.category, monthWindow)
+          getTrendTimeline(activeTrend.category, FULL_TIMELINE_MONTHS)
         ]);
 
         if (!active) {
@@ -419,7 +357,7 @@ export default function TrendsView() {
     return () => {
       active = false;
     };
-  }, [activeTrend?.category, selectedWindow]);
+  }, [activeTrend?.category]);
 
   const filteredKeywords = useMemo(() => {
     const normalizedQuery = keywordQuery.trim().toLowerCase();
@@ -431,16 +369,12 @@ export default function TrendsView() {
 
   const topKeyword = filteredKeywords[0];
 
+  const normalizedTimeline = useMemo(() => normalizeTimelinePoints(timelinePoints), [timelinePoints]);
+
   const chartSeries = useMemo(() => {
     const monthWindow = getWindowMonths(selectedWindow);
-    const source = normalizeTimelinePoints(timelinePoints, activeTrend, monthWindow);
-
-    if (source.length >= 2) {
-      return source;
-    }
-
-    return buildFallbackSeries(activeTrend, monthWindow);
-  }, [activeTrend, selectedWindow, timelinePoints]);
+    return normalizedTimeline.slice(-monthWindow);
+  }, [normalizedTimeline, selectedWindow]);
 
   const lineChart = useMemo(() => buildLineGraphModel(chartSeries), [chartSeries]);
 
@@ -460,7 +394,7 @@ export default function TrendsView() {
       <div className="max-w-[1400px] animate-in fade-in duration-500">
         <div className="border border-[#E5E2D9] bg-white p-8 text-center shadow-sm">
           <h2 className="font-serif text-xl text-[#111111]">Trend Signals</h2>
-          <p className="mt-2 text-sm text-[#555555]">No trend data available for this selection.</p>
+          <p className="mt-2 text-sm text-[#555555]">{error || 'No live trend data available for this selection.'}</p>
         </div>
       </div>
     );
@@ -468,26 +402,28 @@ export default function TrendsView() {
 
   const statusMeta = STATUS_META[activeTrend.status] ?? STATUS_META.Steady;
   const trendIsPositive = parseGrowthValue(activeTrend.growth) >= 0;
-  const peakPoint = chartSeries.reduce(
-    (highest, current) => (current.value > highest.value ? current : highest),
-    chartSeries[0]
-  );
-  const averageScore = Math.round(
-    chartSeries.reduce((sum, point) => sum + point.value, 0) / chartSeries.length
-  );
-  const forecastScore = Math.max(
-    5,
-    Math.min(100, Math.round(averageScore + (trendIsPositive ? 8 : -6)))
-  );
+  const hasChartData = chartSeries.length > 0;
+  const peakPoint = hasChartData
+    ? chartSeries.reduce(
+        (highest, current) => (current.value > highest.value ? current : highest),
+        chartSeries[0]
+      )
+    : { month: 'N/A', value: 0 };
+  const averageScore = hasChartData
+    ? Math.round(chartSeries.reduce((sum, point) => sum + point.value, 0) / chartSeries.length)
+    : 0;
+  const forecastScore = hasChartData
+    ? Math.max(5, Math.min(100, Math.round(averageScore + (trendIsPositive ? 8 : -6))))
+    : 0;
   const totalVolumeK = Math.round(
     filteredTrends.reduce((sum, trend) => sum + parseVolumeToK(trend.volume), 0)
   );
   const liveProvider = formatProvider(activeTrend.provider || marketTrends[0]?.provider);
-  const sourceList = SOURCE_INDEX[activeTrend.category] || [
-    'Google_Trends_Feed.json',
-    'Catalog_Intelligence_Vector.db',
-    'Regional_Demand_Snapshot.csv'
-  ];
+  const sourceList = buildSourceList(activeTrend);
+  const insightNarrative = buildInsightNarrative(activeTrend);
+  const windowStartLabel = chartSeries[0]?.month || 'N/A';
+  const windowEndLabel = chartSeries[chartSeries.length - 1]?.month || 'N/A';
+  const timelineUnavailable = chartSeries.length < 2;
 
   return (
     <div className="mx-auto w-full max-w-[1400px] screen-enter">
@@ -616,7 +552,7 @@ export default function TrendsView() {
                 {activeTrend.category} signals {trendIsPositive ? 'expanding' : 'cooling'} in {activeTrend.region}.
               </h4>
               <p className="mb-6 border-l-2 border-white bg-black/10 p-4 text-xs leading-relaxed text-white/90">
-                {INSIGHT_COPY[activeTrend.category] || 'Live trend signals suggest category performance is shifting. Use weekly refresh cycles to calibrate allocation and pricing decisions.'}
+                {insightNarrative}
               </p>
 
               <div className="mb-6 flex flex-wrap items-center gap-3">
@@ -848,7 +784,7 @@ export default function TrendsView() {
                   Macro Indicator: {activeTrend.category}
                 </p>
                 <p className="mt-1 text-[9px] font-bold uppercase tracking-widest text-[#AAA29A]">
-                  Window: {selectedWindow} ({chartSeries[0]?.month} to {chartSeries[chartSeries.length - 1]?.month})
+                  Window: {selectedWindow} ({windowStartLabel} to {windowEndLabel})
                 </p>
               </div>
               <div className="grid grid-cols-2 gap-4 text-right">
@@ -980,6 +916,12 @@ export default function TrendsView() {
                   </g>
                 )}
               </svg>
+
+              {timelineUnavailable && (
+                <p className="mt-2 text-center text-[10px] font-bold uppercase tracking-widest text-[#888888]">
+                  Timeline points unavailable from live providers.
+                </p>
+              )}
             </div>
 
             <div className="mt-3 flex justify-between text-[9px] font-bold uppercase tracking-widest text-[#888888]">
