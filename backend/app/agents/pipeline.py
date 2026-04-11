@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import uuid
 from typing import TypedDict
 
@@ -25,6 +26,49 @@ class PipelineState(TypedDict, total=False):
 
 
 class ConfluxePipeline:
+    NAME_TOKEN_EXPANSIONS: dict[str, str] = {
+        'athltc': 'athletic',
+        'athletic': 'athletic',
+        'br': 'bra',
+        'spt': 'sport',
+        'blk': 'black',
+        'blck': 'black',
+        'wht': 'white',
+        'gry': 'grey',
+        'nvy': 'navy',
+        'brwn': 'brown',
+        'snkrs': 'sneakers',
+        'sneakers': 'sneakers',
+        'hgh': 'high',
+        'tp': 'top',
+        'wntr': 'winter',
+        'smmr': 'summer',
+        'sndls': 'sandals',
+        'lthr': 'leather',
+        'blt': 'belt',
+        'bckl': 'buckle',
+        'slvr': 'silver',
+        'rncoat': 'raincoat',
+        'trnsprnt': 'transparent',
+        'mx': 'maxi',
+        'drss': 'dress',
+        'bho': 'boho',
+        'prnt': 'print',
+        'frml': 'formal',
+        'csl': 'casual',
+        'mens': 'mens',
+        'wmn': 'women',
+        'ovrszd': 'oversized',
+        'grphc': 'graphic',
+        'shrt': 'shirt',
+        'slmfit': 'slim fit',
+        'slimfit': 'slim fit',
+        'runng': 'running',
+        'hddie': 'hoodie',
+        'unsex': 'unisex'
+    }
+    NAME_UPPERCASE_TOKENS: set[str] = {'xs', 's', 'm', 'l', 'xl', 'xxl', 'xxxl'}
+
     PRICE_BANDS: dict[str, tuple[float, float]] = {
         'Streetwear': (1200.0, 4500.0),
         'Activewear': (1500.0, 5200.0),
@@ -216,10 +260,52 @@ class ConfluxePipeline:
             ai_reasoning=ai_reasoning
         )
 
+    @classmethod
+    def prettify_product_name(cls, item_desc: str) -> str:
+        text = str(item_desc or '').strip()
+        if not text:
+            return 'Unknown Product'
+
+        # Handle escaped characters from malformed CSV exports.
+        text = text.replace('\\_', '_').replace('\\&', '&')
+        text = re.sub(r'(?<=\w)-(?=\w)', ' ', text)
+        text = re.sub(r'[\\_/]+', ' ', text)
+        text = re.sub(r'([^\W\d_]+)(\d+)', r'\1 \2', text)
+        text = re.sub(r'(\d+)([^\W\d_]+)', r'\1 \2', text)
+        text = re.sub(r'\s+', ' ', text).strip()
+
+        expanded_tokens: list[str] = []
+        for raw_token in text.split(' '):
+            token = raw_token.strip()
+            if not token:
+                continue
+
+            lowered = token.lower()
+            expanded = cls.NAME_TOKEN_EXPANSIONS.get(lowered, lowered)
+            expanded_tokens.extend(part for part in expanded.split(' ') if part)
+
+        if not expanded_tokens:
+            return 'Unknown Product'
+
+        formatted_tokens: list[str] = []
+        for token in expanded_tokens:
+            if token in cls.NAME_UPPERCASE_TOKENS:
+                formatted_tokens.append(token.upper())
+            elif token.isdigit():
+                formatted_tokens.append(token)
+            elif re.fullmatch(r'\d+[a-z]{1,2}', token):
+                formatted_tokens.append(token[:-2] + token[-2:].upper())
+            elif token == '&':
+                formatted_tokens.append(token)
+            else:
+                formatted_tokens.append(token.capitalize())
+
+        return ' '.join(formatted_tokens)
+
     def _deterministic_normalize(self, raw_product: RawVendorProduct) -> NormalizedProduct:
-        normalized_name = ' '.join(raw_product.item_desc.split()).title()
+        normalized_name = self.prettify_product_name(raw_product.item_desc)
         normalized_brand = (raw_product.brand or normalized_name.split(' ')[0]).upper()
-        normalized_category = self._category_from_text(raw_product.item_desc)
+        normalized_category = self._category_from_text(normalized_name)
         price_inr = round(raw_product.msrp_usd * settings.usd_inr_rate, 2)
 
         return NormalizedProduct(
@@ -235,7 +321,7 @@ class ConfluxePipeline:
 
         if any(keyword in text for keyword in ('hoodie', 'street', 'graphic', 'baggy', 'parachute')):
             return 'Streetwear'
-        if any(keyword in text for keyword in ('yoga', 'active', 'gym', 'athletic', 'seamless')):
+        if any(keyword in text for keyword in ('yoga', 'active', 'gym', 'athletic', 'seamless', 'sports bra', 'running')):
             return 'Activewear'
         if any(keyword in text for keyword in ('blazer', 'formal', 'office', 'suit', 'slim fit')):
             return 'Formalwear'

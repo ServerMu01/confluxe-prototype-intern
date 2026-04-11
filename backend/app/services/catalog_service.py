@@ -19,10 +19,12 @@ from app.models.schemas import CatalogJobListItem, CatalogStatusResponse, Intell
 
 
 def record_to_output(record: dict[str, Any]) -> IntelligenceOutput:
+    display_name = ConfluxePipeline.prettify_product_name(str(record.get('name', 'Unknown Product')))
+
     return IntelligenceOutput(
         normalized_product=NormalizedProduct(
             id=str(record.get('product_id', '')),
-            name=str(record.get('name', 'Unknown Product')),
+            name=display_name,
             brand=str(record.get('brand', 'UNKNOWN')),
             category=str(record.get('category', 'Accessories')),
             price_inr=float(record.get('price_inr', 0.0))
