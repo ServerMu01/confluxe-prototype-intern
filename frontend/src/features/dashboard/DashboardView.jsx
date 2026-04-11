@@ -320,21 +320,57 @@ export default function DashboardView({ onGenerateReport, selectedCatalogJobId }
                   Live Market Mapping
                 </p>
               </div>
-              <div className="w-full space-y-3 sm:max-w-[760px]">
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                  <label className="relative block w-full sm:flex-1">
-                    <Search
-                      size={12}
-                      className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#888888]"
-                    />
-                    <input
-                      type="text"
-                      value={recommendationQuery}
-                      onChange={(event) => setRecommendationQuery(event.target.value)}
-                      placeholder="Search product, brand, category"
-                      className="w-full border border-[#E5E2D9] bg-[#FCFBF8] py-2 pl-8 pr-3 text-xs font-medium text-[#111111] placeholder-[#888888] focus:border-[#111111] focus:bg-white focus:outline-none"
-                    />
-                  </label>
+              <div className="grid w-full grid-cols-1 gap-2 sm:w-auto sm:grid-cols-2 lg:grid-cols-4">
+                <label className="relative block">
+                  <Search
+                    size={12}
+                    className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#888888]"
+                  />
+                  <input
+                    type="text"
+                    value={recommendationQuery}
+                    onChange={(event) => setRecommendationQuery(event.target.value)}
+                    placeholder="Search product or brand"
+                    className="w-full border border-[#E5E2D9] py-2 pl-8 pr-3 text-xs text-[#111111] placeholder-[#888888] focus:border-[#111111] focus:outline-none"
+                  />
+                </label>
+
+                <select
+                  value={actionFilter}
+                  onChange={(event) => setActionFilter(event.target.value)}
+                  className="confluxe-select w-full py-2 text-[10px] font-bold uppercase tracking-widest"
+                >
+                  {ACTION_FILTERS.map((option) => (
+                    <option key={option} value={option}>
+                      {option === 'ALL' ? 'All Actions' : option}
+                    </option>
+                  ))}
+                </select>
+
+                <select
+                  value={categoryFilter}
+                  onChange={(event) => setCategoryFilter(event.target.value)}
+                  className="confluxe-select w-full py-2 text-[10px] font-bold uppercase tracking-widest"
+                >
+                  {availableCategories.map((option) => (
+                    <option key={option} value={option}>
+                      {option === 'ALL' ? 'All Categories' : option}
+                    </option>
+                  ))}
+                </select>
+
+                <div className="flex gap-2">
+                  <select
+                    value={demandFilter}
+                    onChange={(event) => setDemandFilter(event.target.value)}
+                    className="confluxe-select w-full py-2 text-[10px] font-bold uppercase tracking-widest"
+                  >
+                    {DEMAND_FILTERS.map((option) => (
+                      <option key={option} value={option}>
+                        {option === 'ALL' ? 'All Demand' : option}
+                      </option>
+                    ))}
+                  </select>
 
                   {(recommendationQuery || actionFilter !== 'ALL' || categoryFilter !== 'ALL' || demandFilter !== 'ALL') && (
                     <button
@@ -345,79 +381,11 @@ export default function DashboardView({ onGenerateReport, selectedCatalogJobId }
                         setCategoryFilter('ALL');
                         setDemandFilter('ALL');
                       }}
-                      className="border border-[#111111] bg-[#111111] px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-white transition hover:bg-[#E32929] hover:border-[#E32929]"
+                      className="border border-[#E5E2D9] px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-[#555555] transition hover:border-[#111111] hover:text-[#111111]"
                     >
-                      Clear Filters
+                      Clear
                     </button>
                   )}
-                </div>
-
-                <div className="space-y-2 border border-[#E5E2D9] bg-[#FAF9F5] p-3">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-[9px] font-bold uppercase tracking-widest text-[#888888]">Action</span>
-                    {ACTION_FILTERS.map((option) => {
-                      const active = actionFilter === option;
-
-                      return (
-                        <button
-                          key={option}
-                          type="button"
-                          onClick={() => setActionFilter(option)}
-                          className={`border px-2.5 py-1 text-[9px] font-bold uppercase tracking-widest transition ${
-                            active
-                              ? 'border-[#111111] bg-[#111111] text-white'
-                              : 'border-[#E5E2D9] bg-white text-[#555555] hover:border-[#111111] hover:text-[#111111]'
-                          }`}
-                        >
-                          {option === 'ALL' ? 'All' : option}
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-[9px] font-bold uppercase tracking-widest text-[#888888]">Category</span>
-                    {availableCategories.map((option) => {
-                      const active = categoryFilter === option;
-
-                      return (
-                        <button
-                          key={option}
-                          type="button"
-                          onClick={() => setCategoryFilter(option)}
-                          className={`border px-2.5 py-1 text-[9px] font-bold uppercase tracking-widest transition ${
-                            active
-                              ? 'border-[#111111] bg-[#111111] text-white'
-                              : 'border-[#E5E2D9] bg-white text-[#555555] hover:border-[#111111] hover:text-[#111111]'
-                          }`}
-                        >
-                          {option === 'ALL' ? 'All Categories' : option}
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-[9px] font-bold uppercase tracking-widest text-[#888888]">Demand</span>
-                    {DEMAND_FILTERS.map((option) => {
-                      const active = demandFilter === option;
-
-                      return (
-                        <button
-                          key={option}
-                          type="button"
-                          onClick={() => setDemandFilter(option)}
-                          className={`border px-2.5 py-1 text-[9px] font-bold uppercase tracking-widest transition ${
-                            active
-                              ? 'border-[#111111] bg-[#111111] text-white'
-                              : 'border-[#E5E2D9] bg-white text-[#555555] hover:border-[#111111] hover:text-[#111111]'
-                          }`}
-                        >
-                          {option === 'ALL' ? 'All' : option}
-                        </button>
-                      );
-                    })}
-                  </div>
                 </div>
               </div>
             </div>
