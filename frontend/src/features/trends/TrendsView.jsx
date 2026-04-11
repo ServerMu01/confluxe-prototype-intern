@@ -49,8 +49,6 @@ const SOURCE_INDEX = {
   Outerwear: ['IMD_Regional_Weather_Trends.csv', 'Winterwear_Search_Timeline.json', 'Regional_Climate_Demand_Map.pdf']
 };
 
-const MONTH_ABBREVIATIONS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
 const FALLBACK_TREND_DASHBOARD = [
   {
     category: 'Streetwear',
@@ -148,9 +146,13 @@ function normalizeMonthLabel(rawValue, fallbackMonth) {
       return parsedDate.toLocaleString('en-US', { month: 'short' });
     }
 
-    const alphabeticPrefix = trimmed.replace(/[^a-zA-Z]/g, '').slice(0, 3).toLowerCase();
-    const foundMonth = MONTH_ABBREVIATIONS.find((month) => month.toLowerCase() === alphabeticPrefix);
-    return foundMonth || fallbackMonth;
+    const compact = trimmed.replace(/[^a-zA-Z]/g, '');
+    if (compact.length >= 3) {
+      const abbreviation = compact.slice(0, 1).toUpperCase() + compact.slice(1, 3).toLowerCase();
+      return abbreviation;
+    }
+
+    return trimmed;
   }
 
   return fallbackMonth;
@@ -158,47 +160,42 @@ function normalizeMonthLabel(rawValue, fallbackMonth) {
 
 function normalizeTimelinePoints(rawTimeline, activeTrend, monthCount = 12) {
   const fallback = buildFallbackSeries(activeTrend, monthCount);
-  const rollingMonths = getRollingMonthLabels(monthCount);
 
   if (!Array.isArray(rawTimeline) || rawTimeline.length === 0) {
     return fallback;
   }
 
-  const bucket = new Map();
+  const normalized = rawTimeline
+    .map((point, index) => {
+      const fallbackPoint = fallback[index % fallback.length];
+      const month = normalizeMonthLabel(
+        point?.month ?? point?.label ?? point?.date ?? point?.period,
+        fallbackPoint.month
+      );
+      const rawValue = point?.value ?? point?.interest ?? point?.score ?? point?.signal;
+      const numericValue = Number(rawValue);
+      const value = Number.isFinite(numericValue)
+        ? Math.max(0, Math.min(100, Math.round(numericValue)))
+        : fallbackPoint.value;
 
-  rawTimeline.forEach((point, index) => {
-    const fallbackPoint = fallback[index % fallback.length];
-    const month = normalizeMonthLabel(
-      point?.month ?? point?.label ?? point?.date ?? point?.period,
-      fallbackPoint.month
-    );
-    const rawValue = point?.value ?? point?.interest ?? point?.score ?? point?.signal;
-    const numericValue = Number(rawValue);
-    const value = Number.isFinite(numericValue)
-      ? Math.max(0, Math.min(100, Math.round(numericValue)))
-      : fallbackPoint.value;
+      return {
+        month,
+        value
+      };
+    })
+    .filter((point) => typeof point.month === 'string' && point.month.trim() !== '');
 
-    const existing = bucket.get(month) || { sum: 0, count: 0 };
-    bucket.set(month, {
-      sum: existing.sum + value,
-      count: existing.count + 1
-    });
-  });
+  if (normalized.length >= monthCount) {
+    return normalized.slice(-monthCount);
+  }
 
-  const normalized = rollingMonths.map((month, index) => {
-    const monthBucket = bucket.get(month);
+  if (normalized.length >= 2) {
+    const missing = monthCount - normalized.length;
+    const paddedPrefix = fallback.slice(0, missing);
+    return [...paddedPrefix, ...normalized];
+  }
 
-    if (!monthBucket || monthBucket.count === 0) {
-      return fallback[index];
-    }
-
-    return {
-      month,
-      value: Math.round(monthBucket.sum / monthBucket.count)
-    };
-  });
-
-  return normalized.length >= 2 ? normalized : fallback;
+  return fallback;
 }
 
 function buildLineGraphModel(series) {

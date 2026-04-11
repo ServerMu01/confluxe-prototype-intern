@@ -238,8 +238,13 @@ class TrendService:
         growth_factor = float(profile['growth_percentage']) / 28.0
 
         timeline: list[TrendTimelinePoint] = []
-        month_labels = ['Nov', 'Dec', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct']
-        for index, label in enumerate(month_labels):
+        anchor = datetime.now(timezone.utc)
+        for index in range(12):
+            month_index = (anchor.month - 1) - (11 - index)
+            year = anchor.year + (month_index // 12)
+            month = (month_index % 12) + 1
+            label = datetime(year, month, 1, tzinfo=timezone.utc).strftime('%b')
+
             seasonal_swing = ((index % 3) - 1) * 4
             drift = (index - 5) * growth_factor
             value = int(max(4, min(100, round(base_value + seasonal_swing + drift + offset))))
