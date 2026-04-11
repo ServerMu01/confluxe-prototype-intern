@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -23,6 +24,15 @@ class TrendSnapshot:
 
 
 class TrendService:
+    CATEGORY_ORDER: tuple[str, ...] = (
+        'Streetwear',
+        'Activewear',
+        'Formalwear',
+        'Outerwear',
+        'Footwear',
+        'Accessories'
+    )
+
     def __init__(self) -> None:
         self._cache: dict[str, TrendSnapshot] = {}
         self._category_terms: dict[str, str] = {
@@ -41,26 +51,29 @@ class TrendService:
     def get_macro_trends(self) -> list[TrendDashboardItem]:
         items: list[TrendDashboardItem] = []
 
-        for category in ('Streetwear', 'Activewear', 'Formalwear', 'Outerwear', 'Footwear', 'Accessories'):
+        def load_category(category: str) -> TrendDashboardItem | None:
             try:
                 snapshot = self._load_snapshot(category, allow_remote=True)
             except TrendDataUnavailableError:
-                continue
+                return None
 
             signal = snapshot.signal
             status = self._status_from_signal(signal)
-
-            items.append(
-                TrendDashboardItem(
-                    category=signal.category,
-                    volume=f"{round(signal.search_volume / 1000)}K",
-                    growth=f"{signal.growth_percentage:+.0f}%",
-                    region=signal.top_region,
-                    status=status,
-                    momentum_score=signal.momentum_score,
-                    provider=snapshot.provider
-                )
+            return TrendDashboardItem(
+                category=signal.category,
+                volume=f"{round(signal.search_volume / 1000)}K",
+                growth=f"{signal.growth_percentage:+.0f}%",
+                region=signal.top_region,
+                status=status,
+                momentum_score=signal.momentum_score,
+                provider=snapshot.provider
             )
+
+        workers = min(6, len(self.CATEGORY_ORDER))
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            results = list(executor.map(load_category, self.CATEGORY_ORDER))
+
+        items = [item for item in results if item is not None]
 
         if not items:
             raise TrendDataUnavailableError('No live trend signals are currently available from providers.')
@@ -112,19 +125,19 @@ class TrendService:
                 {
                     'searchTerms': [query],
                     'geo': settings.trends_geo,
-                    'timeRange': 'today 12-m',
+                    'timeRange': 'today 5-y',
                     'maxItems': 100
                 },
                 {
-                    'queries': [query],
+                    'searchTerms': [query],
                     'geo': settings.trends_geo,
-                    'timeframe': 'today 12-m',
+                    'timeRange': 'today 3-m',
                     'maxItems': 100
                 },
                 {
-                    'searchTerm': query,
+                    'searchTerms': [query],
                     'geo': settings.trends_geo,
-                    'timeRange': 'today 12-m',
+                    'timeRange': 'all',
                     'maxItems': 100
                 }
             ]
@@ -207,7 +220,7 @@ class TrendService:
                 'clean': 'true'
             },
             json=actor_input,
-            timeout=45
+            timeout=12
         )
         response.raise_for_status()
         payload = response.json()

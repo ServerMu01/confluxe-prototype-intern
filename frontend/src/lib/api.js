@@ -18,6 +18,7 @@ function resolveRawBaseUrl() {
 const rawBaseUrl = resolveRawBaseUrl();
 const DEFAULT_REQUEST_TIMEOUT_MS = 10000;
 const UPLOAD_REQUEST_TIMEOUT_MS = 20000;
+const TREND_REQUEST_TIMEOUT_MS = 45000;
 
 function normalizeBaseUrl(value) {
   let normalized = value.trim().replace(/\/+$/, '');
@@ -70,7 +71,7 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = DEFAULT_REQUEST_T
   }
 }
 
-async function request(path, options = {}) {
+async function request(path, options = {}, timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS) {
   let response;
 
   try {
@@ -83,7 +84,7 @@ async function request(path, options = {}) {
           ...(options.headers || {})
         }
       },
-      DEFAULT_REQUEST_TIMEOUT_MS
+      timeoutMs
     );
   } catch (error) {
     if (error instanceof Error) {
@@ -132,21 +133,21 @@ export async function listIntelligenceProducts({ action, category, jobId } = {})
 }
 
 export async function listTrendSignals() {
-  return request('/intelligence/trends');
+  return request('/intelligence/trends', {}, TREND_REQUEST_TIMEOUT_MS);
 }
 
 export async function listTrendKeywords(category, limit = 12) {
   const params = new URLSearchParams();
   params.set('category', category);
   params.set('limit', String(limit));
-  return request(`/intelligence/trends/keywords?${params.toString()}`);
+  return request(`/intelligence/trends/keywords?${params.toString()}`, {}, TREND_REQUEST_TIMEOUT_MS);
 }
 
 export async function getTrendTimeline(category, months = 12) {
   const params = new URLSearchParams();
   params.set('category', category);
   params.set('months', String(months));
-  return request(`/intelligence/trends/timeline?${params.toString()}`);
+  return request(`/intelligence/trends/timeline?${params.toString()}`, {}, TREND_REQUEST_TIMEOUT_MS);
 }
 
 export async function queryCopilot(query) {
