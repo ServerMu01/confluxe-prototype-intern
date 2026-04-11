@@ -8,6 +8,17 @@ const TIME_WINDOWS = [
   { id: '6M', months: 6 },
   { id: '12M', months: 12 }
 ];
+const TIER_ONE_REGION_OPTIONS = [
+  'All Over India',
+  'Delhi NCR',
+  'Mumbai',
+  'Bengaluru',
+  'Hyderabad',
+  'Chennai',
+  'Pune',
+  'Kolkata',
+  'Ahmedabad'
+];
 
 function getWindowMonths(windowId) {
   return TIME_WINDOWS.find((window) => window.id === windowId)?.months ?? 12;
@@ -295,17 +306,18 @@ export default function TrendsView() {
     };
   }, []);
 
-  const regions = useMemo(
-    () => ['All Regions', ...new Set(marketTrends.map((trend) => trend.region))],
-    [marketTrends]
-  );
+  const regions = useMemo(() => {
+    const merged = [...TIER_ONE_REGION_OPTIONS, ...marketTrends.map((trend) => trend.region)];
+    return ['All Regions', ...new Set(merged.filter((region) => String(region || '').trim() !== ''))];
+  }, [marketTrends]);
 
   const filteredTrends = useMemo(() => {
-    if (selectedRegion === 'All Regions') {
+    if (selectedRegion === 'All Regions' || selectedRegion === 'All Over India') {
       return marketTrends;
     }
 
-    return marketTrends.filter((trend) => trend.region === selectedRegion);
+    const exactMatches = marketTrends.filter((trend) => trend.region === selectedRegion);
+    return exactMatches.length > 0 ? exactMatches : marketTrends;
   }, [marketTrends, selectedRegion]);
 
   const activeTrend = useMemo(() => {
