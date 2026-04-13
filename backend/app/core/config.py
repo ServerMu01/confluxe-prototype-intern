@@ -19,6 +19,8 @@ class Settings(BaseSettings):
         default='apify/google-trends-scraper',
         alias='APIFY_GOOGLE_TRENDS_ACTOR_ID'
     )
+    serpapi_api_key: str | None = Field(default=None, alias='SERPAPI_API_KEY')
+    serpapi_timeout_seconds: int = Field(default=10, alias='SERPAPI_TIMEOUT_SECONDS')
     trends_geo: str = Field(default='IN', alias='TRENDS_GEO')
     trend_cache_ttl_seconds: int = Field(default=900, alias='TREND_CACHE_TTL_SECONDS')
     trend_persisted_cache_ttl_seconds: int = Field(

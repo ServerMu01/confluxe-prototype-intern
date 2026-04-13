@@ -26,6 +26,8 @@ uvicorn app.main:app --reload --port 8000
 - `GROQ_MODEL_REASONER` (default: `llama-3.3-70b-versatile`)
 - `APIFY_API_TOKEN` (optional; if missing backend falls back to pytrends)
 - `APIFY_GOOGLE_TRENDS_ACTOR_ID` (default: `apify/google-trends-scraper`)
+- `SERPAPI_API_KEY` (optional; preferred high-quality trend provider when configured)
+- `SERPAPI_TIMEOUT_SECONDS` (default: `10`)
 - `TRENDS_GEO` (default: `IN`)
 - `TREND_CACHE_TTL_SECONDS` (default: `900`)
 - `TREND_PERSISTED_CACHE_TTL_SECONDS` (default: `43200`; 12h persisted cache freshness for API cost reduction)
@@ -62,11 +64,18 @@ uvicorn app.main:app --reload --port 8000
 
 ### Free-Tier Trend Provider Strategy
 
-- Provider order is optimized for free-tier reliability and lower cost:
-	1. Pytrends (Google Trends unofficial API)
-	2. Google News RSS (no auth, free, fast fallback)
-	3. Apify Google Trends Actor (`apify/google-trends-scraper`)
+- Provider fallback order is quality-prioritized and sequential:
+	1. SerpApi Google Trends (if `SERPAPI_API_KEY` is set)
+	2. Apify Google Trends Actor (`apify/google-trends-scraper`)
+	3. Pytrends (Google Trends unofficial API)
+	4. Google News RSS (free, no-auth fallback)
 - Apify Actor IDs are accepted in either slash form (`apify/google-trends-scraper`) or tilde form (`apify~google-trends-scraper`).
+
+### Catalog-Aware Trend Signals
+
+- Trend categories are selected from the most recent catalog intelligence records rather than fixed defaults.
+- Provider search queries are generated from recent catalog brand/product context per category.
+- Trend snapshot cache keys include resolved query context, so trend signals update when catalog composition changes.
 
 ### CORS / Frontend Deployment Note
 

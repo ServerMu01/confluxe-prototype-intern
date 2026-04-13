@@ -30,7 +30,11 @@ def on_startup() -> None:
     db_available = is_database_available()
 
     trend_snapshot_collection = database['trend_snapshots'] if db_available else None
-    trend_service = TrendService(snapshot_collection=trend_snapshot_collection)
+    trend_records_collection = database['intelligence_records'] if db_available else None
+    trend_service = TrendService(
+        snapshot_collection=trend_snapshot_collection,
+        records_collection=trend_records_collection
+    )
     pipeline = ConfluxePipeline(trend_service=trend_service)
 
     app.state.trend_service = trend_service

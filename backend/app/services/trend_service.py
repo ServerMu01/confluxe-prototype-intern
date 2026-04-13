@@ -40,6 +40,24 @@ class TrendService:
         'Footwear',
         'Accessories'
     )
+    MAX_TREND_CATEGORIES = 6
+    CATALOG_QUERY_SAMPLE_SIZE = 80
+    BRAND_EXCLUSIONS: set[str] = {
+        'unknown',
+        'none',
+        'null',
+        'n/a',
+        'na',
+        'unbranded',
+        'generic'
+    }
+    QUERY_STOPWORDS: set[str] = {
+        'men', 'mens', 'women', 'womens', 'kid', 'kids', 'boys', 'girls', 'unisex',
+        'new', 'latest', 'premium', 'classic', 'style', 'fashion', 'wear',
+        'india', 'indian', 'online', 'pack', 'set', 'solid', 'regular', 'fit',
+        'top', 'bottom', 'shirt', 'shirts', 'tshirt', 'tees', 'jeans', 'pant',
+        'pants', 'dress', 'dresses', 'jacket', 'jackets', 'shoe', 'shoes'
+    }
     TIER_ONE_CITIES: tuple[str, ...] = (
         'Delhi NCR',
         'Mumbai',
@@ -75,9 +93,14 @@ class TrendService:
         'gujarat': 'Ahmedabad'
     }
 
-    def __init__(self, snapshot_collection: Collection | None = None) -> None:
+    def __init__(
+        self,
+        snapshot_collection: Collection | None = None,
+        records_collection: Collection | None = None
+    ) -> None:
         self._cache: dict[str, TrendSnapshot] = {}
         self._snapshot_collection = snapshot_collection
+        self._records_collection = records_collection
         self._category_terms: dict[str, str] = {
             'Streetwear': 'streetwear fashion india',
             'Activewear': 'activewear india',
@@ -133,6 +156,7 @@ class TrendService:
 
     def get_macro_trends(self) -> list[TrendDashboardItem]:
         items: list[TrendDashboardItem] = []
+        categories = self._resolve_trend_categories()
 
         def load_category(category: str) -> TrendDashboardItem | None:
             try:
@@ -152,9 +176,9 @@ class TrendService:
                 provider=snapshot.provider
             )
 
-        workers = min(6, len(self.CATEGORY_ORDER))
+        workers = min(6, len(categories))
         with ThreadPoolExecutor(max_workers=workers) as executor:
-            results = list(executor.map(load_category, self.CATEGORY_ORDER))
+            results = list(executor.map(load_category, categories))
 
         items = [item for item in results if item is not None]
 
@@ -173,51 +197,149 @@ class TrendService:
 
     def _load_snapshot(self, category: str, allow_remote: bool = True) -> TrendSnapshot:
         normalized_category = self._normalize_category(category)
+        query_term = self._resolve_catalog_query(normalized_category)
+        cache_key = self._snapshot_cache_key(normalized_category, query_term)
         now = datetime.now(timezone.utc)
-        cached = self._cache.get(normalized_category)
+        cached = self._cache.get(cache_key)
 
         if cached:
             if self._is_within_age(cached.fetched_at, settings.trend_cache_ttl_seconds, now=now):
                 return cached
 
         persisted_fresh = self._load_snapshot_from_store(
-            normalized_category,
+            cache_key,
             max_age_seconds=settings.trend_persisted_cache_ttl_seconds,
             now=now
         )
         if persisted_fresh:
-            self._cache[normalized_category] = persisted_fresh
+            self._cache[cache_key] = persisted_fresh
             return persisted_fresh
 
         snapshot: TrendSnapshot | None = None
 
         if allow_remote:
-            snapshot = self._build_pytrends_snapshot(normalized_category)
-            if not snapshot:
-                snapshot = self._build_google_news_rss_snapshot(normalized_category)
-            if not snapshot:
-                snapshot = self._build_apify_snapshot(normalized_category)
+            provider_chain = (
+                self._build_serpapi_snapshot,
+                self._build_apify_snapshot,
+                self._build_pytrends_snapshot,
+                self._build_google_news_rss_snapshot
+            )
+            for provider_builder in provider_chain:
+                snapshot = provider_builder(normalized_category, query=query_term)
+                if snapshot:
+                    break
 
         if snapshot:
-            self._cache[normalized_category] = snapshot
-            self._save_snapshot_to_store(normalized_category, snapshot)
+            self._cache[cache_key] = snapshot
+            self._save_snapshot_to_store(cache_key, normalized_category, query_term, snapshot)
             return snapshot
 
         if cached and self._is_within_age(cached.fetched_at, settings.trend_stale_fallback_max_age_seconds, now=now):
             return self._as_cached_snapshot(cached)
 
         persisted_stale = self._load_snapshot_from_store(
-            normalized_category,
+            cache_key,
             max_age_seconds=settings.trend_stale_fallback_max_age_seconds,
             now=now
         )
         if persisted_stale:
-            self._cache[normalized_category] = persisted_stale
+            self._cache[cache_key] = persisted_stale
             return self._as_cached_snapshot(persisted_stale)
 
         raise TrendDataUnavailableError(
             f'Live trend data is unavailable for {normalized_category}. Check provider connectivity and credentials.'
         )
+
+    def _resolve_trend_categories(self) -> list[str]:
+        if self._records_collection is None:
+            return list(self.CATEGORY_ORDER)
+
+        try:
+            records = list(
+                self._records_collection.find({}, {'_id': 0, 'category': 1})
+                .sort('created_at', -1)
+                .limit(600)
+            )
+        except Exception:
+            return list(self.CATEGORY_ORDER)
+
+        counter: Counter[str] = Counter()
+        for record in records:
+            raw_category = str(record.get('category') or '').strip()
+            if not raw_category:
+                continue
+            counter[self._normalize_category(raw_category)] += 1
+
+        if not counter:
+            return list(self.CATEGORY_ORDER)
+
+        ordered: list[str] = [category for category, _ in counter.most_common(self.MAX_TREND_CATEGORIES)]
+        for fallback_category in self.CATEGORY_ORDER:
+            if fallback_category not in ordered:
+                ordered.append(fallback_category)
+            if len(ordered) >= self.MAX_TREND_CATEGORIES:
+                break
+
+        return ordered[: self.MAX_TREND_CATEGORIES]
+
+    def _resolve_catalog_query(self, category: str) -> str:
+        default_query = self._category_terms.get(category, f'{category} india fashion')
+        if self._records_collection is None:
+            return default_query
+
+        try:
+            records = list(
+                self._records_collection.find(
+                    {
+                        'category': {
+                            '$regex': f'^{re.escape(category)}$',
+                            '$options': 'i'
+                        }
+                    },
+                    {'_id': 0, 'brand': 1, 'name': 1}
+                )
+                .sort('created_at', -1)
+                .limit(self.CATALOG_QUERY_SAMPLE_SIZE)
+            )
+        except Exception:
+            return default_query
+
+        if not records:
+            return default_query
+
+        brand_counter: Counter[str] = Counter()
+        token_counter: Counter[str] = Counter()
+
+        for record in records:
+            brand = str(record.get('brand') or '').strip()
+            if brand and brand.lower() not in self.BRAND_EXCLUSIONS:
+                brand_counter[brand] += 1
+
+            product_name = str(record.get('name') or '').strip().lower()
+            if not product_name:
+                continue
+
+            for token in re.findall(r'[a-zA-Z]{3,}', product_name):
+                if token in self.QUERY_STOPWORDS or len(token) < 4:
+                    continue
+                token_counter[token] += 1
+
+        top_brand = brand_counter.most_common(1)[0][0] if brand_counter else ''
+        top_token = token_counter.most_common(1)[0][0] if token_counter else ''
+
+        query_parts: list[str] = []
+        if top_brand:
+            query_parts.append(top_brand)
+        if top_token and top_token.lower() not in top_brand.lower():
+            query_parts.append(top_token)
+        query_parts.append(category.lower())
+        query_parts.append('india')
+
+        resolved = re.sub(r'\s+', ' ', ' '.join(part for part in query_parts if part)).strip()
+        if len(resolved) < 5:
+            return default_query
+
+        return resolved[:120]
 
     @staticmethod
     def _is_within_age(fetched_at: datetime, max_age_seconds: int, now: datetime | None = None) -> bool:
@@ -250,14 +372,18 @@ class TrendService:
         )
 
     @staticmethod
-    def _snapshot_cache_key(category: str) -> str:
+    def _snapshot_cache_key(category: str, query_term: str | None = None) -> str:
         geo = settings.trends_geo.strip().upper() or 'IN'
-        normalized = category.strip().lower()
-        return f'{geo}::{normalized}'
+        normalized_category = category.strip().lower()
+        normalized_query = re.sub(r'[^a-z0-9]+', '-', str(query_term or '').lower()).strip('-')
+        if len(normalized_query) > 64:
+            normalized_query = normalized_query[:64]
+
+        return f'{geo}::{normalized_category}::{normalized_query or "default"}'
 
     def _load_snapshot_from_store(
         self,
-        category: str,
+        cache_key: str,
         max_age_seconds: int,
         now: datetime | None = None
     ) -> TrendSnapshot | None:
@@ -270,7 +396,7 @@ class TrendService:
         try:
             document = self._snapshot_collection.find_one(
                 {
-                    'cache_key': self._snapshot_cache_key(category),
+                    'cache_key': cache_key,
                     'fetched_at': {'$gte': threshold}
                 },
                 sort=[('fetched_at', -1)],
@@ -327,13 +453,20 @@ class TrendService:
             fetched_at=self._to_utc_datetime(fetched_at)
         )
 
-    def _save_snapshot_to_store(self, category: str, snapshot: TrendSnapshot) -> None:
+    def _save_snapshot_to_store(
+        self,
+        cache_key: str,
+        category: str,
+        query_term: str,
+        snapshot: TrendSnapshot
+    ) -> None:
         if self._snapshot_collection is None:
             return
 
         document = {
-            'cache_key': self._snapshot_cache_key(category),
+            'cache_key': cache_key,
             'category': category,
+            'query_term': query_term,
             'geo': settings.trends_geo,
             'provider': snapshot.provider,
             'signal': snapshot.signal.model_dump(),
@@ -353,11 +486,11 @@ class TrendService:
             # Snapshot persistence is a cost optimization and should not fail requests.
             return
 
-    def _build_apify_snapshot(self, category: str) -> TrendSnapshot | None:
+    def _build_apify_snapshot(self, category: str, query: str | None = None) -> TrendSnapshot | None:
         if not settings.apify_api_token:
             return None
 
-        query = self._category_terms.get(category, category)
+        query = str(query or self._category_terms.get(category, category)).strip()
 
         try:
             apify_items: list[dict[str, Any]] = []
@@ -411,8 +544,74 @@ class TrendService:
         except Exception:
             return None
 
-    def _build_pytrends_snapshot(self, category: str) -> TrendSnapshot | None:
-        query = self._category_terms.get(category, category)
+    def _build_serpapi_snapshot(self, category: str, query: str | None = None) -> TrendSnapshot | None:
+        if not settings.serpapi_api_key:
+            return None
+
+        query = str(query or self._category_terms.get(category, category)).strip()
+        payload: dict[str, Any] | None = None
+
+        parameter_candidates: list[dict[str, Any]] = [
+            {
+                'engine': 'google_trends',
+                'q': query,
+                'geo': settings.trends_geo,
+                'data_type': 'TIMESERIES',
+                'api_key': settings.serpapi_api_key
+            },
+            {
+                'engine': 'google_trends',
+                'q': query,
+                'geo': settings.trends_geo,
+                'api_key': settings.serpapi_api_key
+            },
+            {
+                'engine': 'google_trends_explore',
+                'q': query,
+                'geo': settings.trends_geo,
+                'api_key': settings.serpapi_api_key
+            }
+        ]
+
+        for params in parameter_candidates:
+            try:
+                response = requests.get(
+                    'https://serpapi.com/search.json',
+                    params=params,
+                    timeout=max(3, settings.serpapi_timeout_seconds)
+                )
+                response.raise_for_status()
+                candidate_payload = response.json()
+                if isinstance(candidate_payload, dict) and not candidate_payload.get('error'):
+                    payload = candidate_payload
+                    break
+            except Exception:
+                continue
+
+        if not payload:
+            return None
+
+        timeline = self._extract_apify_timeline([payload])
+        if not timeline:
+            return None
+
+        top_region = self._extract_apify_top_region([payload])
+        keywords = self._extract_apify_keywords([payload])
+
+        signal = self._signal_from_timeline(category, timeline, top_region)
+        if not keywords:
+            keywords = self._fallback_keywords(signal)
+
+        return TrendSnapshot(
+            signal=signal,
+            timeline=timeline,
+            keywords=keywords,
+            provider='serpapi_google_trends',
+            fetched_at=datetime.now(timezone.utc)
+        )
+
+    def _build_pytrends_snapshot(self, category: str, query: str | None = None) -> TrendSnapshot | None:
+        query = str(query or self._category_terms.get(category, category)).strip()
 
         try:
             client = TrendReq(hl='en-US', tz=330)
@@ -455,8 +654,8 @@ class TrendService:
         except Exception:
             return None
 
-    def _build_google_news_rss_snapshot(self, category: str) -> TrendSnapshot | None:
-        query = self._category_news_terms.get(category, f'{category} india fashion')
+    def _build_google_news_rss_snapshot(self, category: str, query: str | None = None) -> TrendSnapshot | None:
+        query = str(query or self._category_news_terms.get(category, f'{category} india fashion')).strip()
 
         try:
             response = requests.get(
