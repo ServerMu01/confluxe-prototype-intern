@@ -298,6 +298,7 @@ class CatalogService:
                 {
                     '$set': {
                         'status': 'completed',
+                        'processed_rows': len(rows),
                         'error_message': f'Skipped {len(row_errors)} invalid row(s). First error: {row_errors[0]}',
                         'updated_at': datetime.now(timezone.utc)
                     }
@@ -310,6 +311,7 @@ class CatalogService:
             {
                 '$set': {
                     'status': 'completed',
+                    'processed_rows': len(rows),
                     'error_message': None,
                     'updated_at': datetime.now(timezone.utc)
                 }

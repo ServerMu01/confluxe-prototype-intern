@@ -9,7 +9,7 @@ from langchain_groq import ChatGroq
 from langgraph.graph import END, StateGraph
 
 from app.core.config import settings
-from app.core.exceptions import LLMTimeoutError
+from app.core.exceptions import LLMTimeoutError, TrendDataUnavailableError
 from app.models.schemas import IntelligenceOutput, NormalizedProduct, RawVendorProduct, TrendSignal
 from app.services.trend_service import TrendService
 
@@ -78,10 +78,20 @@ class ConfluxePipeline:
         'Accessories': (700.0, 3200.0)
     }
 
+    FALLBACK_TREND_SIGNAL: dict[str, tuple[int, float, int, str]] = {
+        'Streetwear': (88000, 14.0, 7, 'All Over India'),
+        'Activewear': (76000, 11.0, 6, 'All Over India'),
+        'Formalwear': (54000, 7.0, 5, 'All Over India'),
+        'Outerwear': (43000, 5.0, 5, 'All Over India'),
+        'Footwear': (97000, 16.0, 7, 'All Over India'),
+        'Accessories': (69000, 9.0, 6, 'All Over India')
+    }
+
     def __init__(self, trend_service: TrendService) -> None:
         self._trend_service = trend_service
         self._normalize_chain = None
         self._explain_chain = None
+        self._trend_signal_cache: dict[str, TrendSignal] = {}
 
         if settings.groq_api_key:
             parser_llm = ChatGroq(
@@ -180,8 +190,35 @@ class ConfluxePipeline:
 
     def trend_fetch_node(self, state: PipelineState) -> PipelineState:
         normalized_product = state['normalized_product']
-        trend_signal = self._trend_service.get_trend_signal(normalized_product.category)
+        trend_signal = self._get_trend_signal_with_fallback(normalized_product.category)
         return {'trend_signal': trend_signal}
+
+    def _get_trend_signal_with_fallback(self, category: str) -> TrendSignal:
+        cached_signal = self._trend_signal_cache.get(category)
+        if cached_signal:
+            return cached_signal
+
+        try:
+            trend_signal = self._trend_service.get_trend_signal(category)
+        except TrendDataUnavailableError:
+            trend_signal = self._fallback_trend_signal(category)
+
+        self._trend_signal_cache[category] = trend_signal
+        return trend_signal
+
+    def _fallback_trend_signal(self, category: str) -> TrendSignal:
+        volume, growth, momentum, region = self.FALLBACK_TREND_SIGNAL.get(
+            category,
+            (62000, 8.0, 6, 'All Over India')
+        )
+
+        return TrendSignal(
+            category=category,
+            search_volume=volume,
+            growth_percentage=growth,
+            momentum_score=momentum,
+            top_region=region
+        )
 
     def scoring_node(self, state: PipelineState) -> PipelineState:
         normalized_product = state['normalized_product']
@@ -239,7 +276,7 @@ class ConfluxePipeline:
 
     def run_bulk(self, raw_product: RawVendorProduct) -> IntelligenceOutput:
         normalized_product = self._deterministic_normalize(raw_product)
-        trend_signal = self._trend_service.get_trend_signal(normalized_product.category)
+        trend_signal = self._get_trend_signal_with_fallback(normalized_product.category)
         scored = self._score_and_action(normalized_product, trend_signal)
         ai_reasoning = self._fallback_reasoning(
             normalized_product=normalized_product,

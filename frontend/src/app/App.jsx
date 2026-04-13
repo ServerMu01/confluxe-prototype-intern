@@ -31,12 +31,26 @@ export default function App() {
 
         setCatalogOptions(jobs);
         setSelectedCatalogJobId((previousId) => {
-          if (previousId && jobs.some((job) => job.job_id === previousId)) {
-            return previousId;
+          const latestCompleted = jobs.find((job) => String(job.status || '').toLowerCase() === 'completed');
+
+          if (!previousId) {
+            return latestCompleted?.job_id || jobs[0]?.job_id || '';
           }
 
-          const completed = jobs.find((job) => String(job.status || '').toLowerCase() === 'completed');
-          return completed?.job_id || jobs[0]?.job_id || '';
+          const previousJob = jobs.find((job) => job.job_id === previousId);
+          if (!previousJob) {
+            return latestCompleted?.job_id || jobs[0]?.job_id || '';
+          }
+
+          if (latestCompleted && latestCompleted.job_id !== previousId) {
+            const latestCompletedTime = new Date(latestCompleted.created_at || 0).getTime();
+            const previousJobTime = new Date(previousJob.created_at || 0).getTime();
+            if (latestCompletedTime > previousJobTime) {
+              return latestCompleted.job_id;
+            }
+          }
+
+          return previousId;
         });
       } catch {
         if (!active) {
