@@ -29,6 +29,13 @@ class Settings(BaseSettings):
         default=604800,
         alias='TREND_STALE_FALLBACK_MAX_AGE_SECONDS'
     )
+    trend_google_news_timeout_seconds: int = Field(
+        default=6,
+        alias='TREND_GOOGLE_NEWS_TIMEOUT_SECONDS'
+    )
+    trend_google_news_hl: str = Field(default='en-IN', alias='TREND_GOOGLE_NEWS_HL')
+    trend_google_news_gl: str = Field(default='IN', alias='TREND_GOOGLE_NEWS_GL')
+    trend_google_news_ceid: str = Field(default='IN:en', alias='TREND_GOOGLE_NEWS_CEID')
 
     catalog_fast_mode_rows: int = Field(default=100, alias='CATALOG_FAST_MODE_ROWS')
     catalog_insert_batch_size: int = Field(default=25, alias='CATALOG_INSERT_BATCH_SIZE')

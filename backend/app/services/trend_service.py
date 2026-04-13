@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from email.utils import parsedate_to_datetime
 import json
 import re
 from typing import Any
 from urllib.parse import quote
+import xml.etree.ElementTree as ET
 
 import requests
 from langchain_core.prompts import ChatPromptTemplate
@@ -81,6 +84,14 @@ class TrendService:
             'Formalwear': 'formalwear india',
             'Outerwear': 'winter jackets india',
             'Footwear': 'sneakers india',
+            'Accessories': 'fashion accessories india'
+        }
+        self._category_news_terms: dict[str, str] = {
+            'Streetwear': 'streetwear india fashion',
+            'Activewear': 'activewear india fitness apparel',
+            'Formalwear': 'formalwear india office wear',
+            'Outerwear': 'jackets india outerwear fashion',
+            'Footwear': 'footwear india sneakers shoes',
             'Accessories': 'fashion accessories india'
         }
         self._keyword_generation_chain = None
@@ -181,9 +192,11 @@ class TrendService:
         snapshot: TrendSnapshot | None = None
 
         if allow_remote:
-            snapshot = self._build_apify_snapshot(normalized_category)
+            snapshot = self._build_pytrends_snapshot(normalized_category)
             if not snapshot:
-                snapshot = self._build_pytrends_snapshot(normalized_category)
+                snapshot = self._build_google_news_rss_snapshot(normalized_category)
+            if not snapshot:
+                snapshot = self._build_apify_snapshot(normalized_category)
 
         if snapshot:
             self._cache[normalized_category] = snapshot
@@ -294,6 +307,14 @@ class TrendService:
             ]
         except Exception:
             return None
+
+        signal = TrendSignal(
+            category=signal.category,
+            search_volume=signal.search_volume,
+            growth_percentage=max(-95.0, min(300.0, float(signal.growth_percentage))),
+            momentum_score=signal.momentum_score,
+            top_region=signal.top_region
+        )
 
         if not timeline:
             return None
@@ -434,8 +455,96 @@ class TrendService:
         except Exception:
             return None
 
+    def _build_google_news_rss_snapshot(self, category: str) -> TrendSnapshot | None:
+        query = self._category_news_terms.get(category, f'{category} india fashion')
+
+        try:
+            response = requests.get(
+                'https://news.google.com/rss/search',
+                params={
+                    'q': query,
+                    'hl': settings.trend_google_news_hl,
+                    'gl': settings.trend_google_news_gl,
+                    'ceid': settings.trend_google_news_ceid
+                },
+                timeout=max(2, settings.trend_google_news_timeout_seconds)
+            )
+            response.raise_for_status()
+        except Exception:
+            return None
+
+        try:
+            root = ET.fromstring(response.content)
+        except ET.ParseError:
+            return None
+
+        items = root.findall('./channel/item')
+        if not items:
+            return None
+
+        now = datetime.now(timezone.utc)
+        day_counter: Counter[Any] = Counter()
+        keyword_counter: Counter[str] = Counter()
+
+        for item in items[:80]:
+            raw_title = str(item.findtext('title') or '').strip()
+            clean_title = self._clean_news_title(raw_title)
+            if len(clean_title) < 3:
+                continue
+
+            parsed_date = self._parse_rfc822_date(str(item.findtext('pubDate') or '').strip())
+            if not parsed_date:
+                parsed_date = now
+
+            day_counter[parsed_date.date()] += 1
+            keyword_counter[clean_title] += 1
+
+        if not day_counter or not keyword_counter:
+            return None
+
+        latest_day = max(day_counter.keys())
+        selected_days = [latest_day - timedelta(days=offset) for offset in range(11, -1, -1)]
+        day_values = [day_counter.get(day, 0) for day in selected_days]
+        peak_value = max(day_values) if day_values else 0
+        if peak_value <= 0:
+            return None
+
+        timeline: list[TrendTimelinePoint] = []
+        for index, count in enumerate(day_values, start=1):
+            normalized_value = int(round((count / peak_value) * 100)) if peak_value > 0 else 0
+            timeline.append(
+                TrendTimelinePoint(
+                    month=f'D{index:02d}',
+                    value=max(0, min(100, normalized_value))
+                )
+            )
+
+        signal = self._signal_from_timeline(category, timeline, 'All Over India')
+
+        max_frequency = keyword_counter.most_common(1)[0][1]
+        keywords: list[TrendKeywordItem] = []
+        for term, frequency in keyword_counter.most_common(12):
+            relative_growth = int(round((frequency / max(1, max_frequency)) * 100))
+            keywords.append(
+                TrendKeywordItem(
+                    term=term[:120],
+                    growth=f'+{max(8, min(100, relative_growth))}%'
+                )
+            )
+
+        return TrendSnapshot(
+            signal=signal,
+            timeline=timeline,
+            keywords=keywords,
+            provider='google_news_rss',
+            fetched_at=now
+        )
+
     def _call_apify_actor(self, actor_input: dict[str, Any]) -> list[dict[str, Any]]:
-        actor_id = quote(settings.apify_google_trends_actor_id, safe='')
+        actor_id = self._apify_actor_path_id()
+        if not actor_id:
+            return []
+
         response = requests.post(
             f'https://api.apify.com/v2/acts/{actor_id}/run-sync-get-dataset-items',
             params={
@@ -458,6 +567,17 @@ class TrendService:
                 return [item for item in payload['data'] if isinstance(item, dict)]
 
         return []
+
+    @staticmethod
+    def _apify_actor_path_id() -> str:
+        raw_actor_id = str(settings.apify_google_trends_actor_id or '').strip()
+        if not raw_actor_id:
+            return ''
+
+        if '~' in raw_actor_id:
+            return quote(raw_actor_id, safe='')
+
+        return quote(raw_actor_id.replace('/', '~'), safe='')
 
     def _extract_apify_timeline(self, payload_items: list[dict[str, Any]]) -> list[TrendTimelinePoint]:
         dated_values: list[tuple[datetime, int]] = []
@@ -622,6 +742,7 @@ class TrendService:
         first_value = max(1, timeline[0].value)
         last_value = timeline[-1].value
         growth_percentage = round(((last_value - first_value) / first_value) * 100.0, 1)
+        growth_percentage = max(-95.0, min(300.0, growth_percentage))
 
         tail = timeline[-3:] if len(timeline) >= 3 else timeline
         tail_average = sum(point.value for point in tail) / len(tail)
@@ -783,6 +904,31 @@ class TrendService:
                 continue
 
         return None
+
+    @staticmethod
+    def _parse_rfc822_date(value: str) -> datetime | None:
+        if not value:
+            return None
+
+        try:
+            parsed = parsedate_to_datetime(value)
+        except (TypeError, ValueError):
+            return None
+
+        if parsed is None:
+            return None
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+
+    @staticmethod
+    def _clean_news_title(title: str) -> str:
+        cleaned = str(title or '').strip()
+        for separator in (' - ', ' | ', ' -- ', ' : '):
+            if separator in cleaned:
+                cleaned = cleaned.split(separator)[0].strip()
+
+        return re.sub(r'\s+', ' ', cleaned).strip()
 
     @staticmethod
     def _normalize_category(category: str) -> str:
