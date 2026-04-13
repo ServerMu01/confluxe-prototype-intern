@@ -286,7 +286,7 @@ export default function TrendsView({ selectedCatalogJobId = '' }) {
   const [keywordFilter, setKeywordFilter] = useState('');
 
   useEffect(() => {
-    setSelectedRegion('All Regions');
+    setSelectedRegion('All Over India');
     setSelectedCategory('');
     setCatalogSearch('');
     setKeywordFilter('');
@@ -383,12 +383,12 @@ export default function TrendsView({ selectedCatalogJobId = '' }) {
       .map((trend) => String(trend.region || '').trim())
       .filter((region) => region !== '');
 
-    return ['All Regions', ...new Set(available)];
+    return ['All Over India', ...new Set(available)];
   }, [marketTrends]);
 
   useEffect(() => {
     if (!regions.includes(selectedRegion)) {
-      setSelectedRegion('All Regions');
+      setSelectedRegion('All Over India');
     }
   }, [regions, selectedRegion]);
 
@@ -465,7 +465,7 @@ export default function TrendsView({ selectedCatalogJobId = '' }) {
   }, [catalogRecords, marketTrends, normalizedCatalogSearch, shouldFilterByCatalogSearch]);
 
   const filteredTrends = useMemo(() => {
-    const byRegion = selectedRegion === 'All Regions'
+    const byRegion = selectedRegion === 'All Over India'
       ? marketTrends
       : marketTrends.filter((trend) => trend.region === selectedRegion);
 
@@ -595,7 +595,7 @@ export default function TrendsView({ selectedCatalogJobId = '' }) {
   }
 
   if (!activeTrend) {
-    const regionMessage = selectedRegion !== 'All Regions'
+    const regionMessage = selectedRegion !== 'All Over India'
       ? `No trend signals found for ${selectedRegion}.`
       : 'No live trend data available for this selection.';
 
@@ -682,60 +682,41 @@ export default function TrendsView({ selectedCatalogJobId = '' }) {
           ))}
         </div>
 
-        <div className="flex flex-col gap-3">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-            <label className="relative block">
-              <Filter
-                size={12}
-                className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#555555]"
-              />
-              <select
-                value={selectedRegion}
-                onChange={(event) => setSelectedRegion(event.target.value)}
-                className="confluxe-select w-full py-2 pl-8 pr-8 text-[10px] font-bold uppercase tracking-widest sm:w-44"
-              >
-                {regions.map((region) => (
-                  <option key={region} value={region}>
-                    {region}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="relative block">
-              <Search size={12} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#888888]" />
-              <input
-                list="catalog-search-suggestions"
-                type="text"
-                value={catalogSearch}
-                onChange={(event) => setCatalogSearch(event.target.value)}
-                placeholder="Search within catalog data (3+ chars)"
-                className="w-full border border-[#E5E2D9] py-2 pl-8 pr-3 text-xs text-[#111111] placeholder-[#888888] focus:border-[#111111] focus:outline-none sm:w-64"
-              />
-              <datalist id="catalog-search-suggestions">
-                {catalogSuggestions.map((suggestion) => (
-                  <option key={suggestion} value={suggestion} />
-                ))}
-              </datalist>
-            </label>
-          </div>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <label className="relative block">
+            <Filter
+              size={12}
+              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#555555]"
+            />
+            <select
+              value={selectedRegion}
+              onChange={(event) => setSelectedRegion(event.target.value)}
+              className="confluxe-select w-full py-2 pl-8 pr-8 text-[10px] font-bold uppercase tracking-widest sm:w-44"
+            >
+              {regions.map((region) => (
+                <option key={region} value={region}>
+                  {region}
+                </option>
+              ))}
+            </select>
+          </label>
 
           <label className="relative block">
             <Search size={12} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#888888]" />
             <input
+              list="catalog-search-suggestions"
               type="text"
-              value={keywordFilter}
-              onChange={(event) => setKeywordFilter(event.target.value)}
-              placeholder="Filter returned query terms"
-              className="w-full border border-[#E5E2D9] py-2 pl-8 pr-3 text-xs text-[#111111] placeholder-[#888888] focus:border-[#111111] focus:outline-none sm:w-80"
+              value={catalogSearch}
+              onChange={(event) => setCatalogSearch(event.target.value)}
+              placeholder="Search within catalog data (3+ chars)"
+              className="w-full border border-[#E5E2D9] py-2 pl-8 pr-3 text-xs text-[#111111] placeholder-[#888888] focus:border-[#111111] focus:outline-none sm:w-64"
             />
+            <datalist id="catalog-search-suggestions">
+              {catalogSuggestions.map((suggestion) => (
+                <option key={suggestion} value={suggestion} />
+              ))}
+            </datalist>
           </label>
-
-          {catalogSearch.trim() && (
-            <p className="text-[10px] font-bold uppercase tracking-widest text-[#555555]">
-              Catalog Search: "{catalogSearch.trim()}"
-            </p>
-          )}
         </div>
       </div>
 
@@ -936,11 +917,23 @@ export default function TrendsView({ selectedCatalogJobId = '' }) {
         <section className="grid grid-cols-1 gap-6 xl:grid-cols-12 md:gap-8">
           <div className="col-span-1 flex flex-col gap-6 xl:col-span-4">
             <div className="fade-up delay-4 flex w-full flex-col border border-[#E5E2D9] bg-white shadow-sm">
-              <div className="flex items-center justify-between border-b border-[#E5E2D9] p-4 md:p-5">
-                <h2 className="font-serif text-[#111111]">Rising Search Queries</h2>
-                <span className="text-[9px] font-bold uppercase tracking-widest text-[#888888]">
-                  {filteredKeywords.length} matching terms
-                </span>
+              <div className="flex flex-col gap-3 border-b border-[#E5E2D9] p-4 md:p-5">
+                <div className="flex items-center justify-between">
+                  <h2 className="font-serif text-[#111111]">Rising Search Queries</h2>
+                  <span className="text-[9px] font-bold uppercase tracking-widest text-[#888888]">
+                    {filteredKeywords.length} matching terms
+                  </span>
+                </div>
+                <label className="relative block">
+                  <Search size={12} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#888888]" />
+                  <input
+                    type="text"
+                    value={keywordFilter}
+                    onChange={(event) => setKeywordFilter(event.target.value)}
+                    placeholder="Filter returned query terms"
+                    className="w-full border border-[#E5E2D9] bg-[#FAF9F5] py-2 pl-8 pr-3 text-[10px] uppercase font-bold tracking-widest text-[#111111] placeholder-[#888888] focus:border-[#111111] focus:bg-white focus:outline-none transition-colors"
+                  />
+                </label>
               </div>
               <div className="flex-1 p-2">
                 {filteredKeywords.length > 0 ? (
