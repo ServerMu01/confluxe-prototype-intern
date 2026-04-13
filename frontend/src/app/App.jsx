@@ -122,7 +122,7 @@ export default function App() {
               />
             )}
             {showCatalogs && <CatalogsView />}
-            {showTrends && <TrendsView />}
+            {showTrends && <TrendsView selectedCatalogJobId={selectedCatalogJobId} />}
           </div>
         </div>
       </main>

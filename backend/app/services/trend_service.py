@@ -150,17 +150,17 @@ class TrendService:
             except Exception:
                 self._keyword_generation_chain = None
 
-    def get_trend_signal(self, category: str) -> TrendSignal:
-        snapshot = self._load_snapshot(category, allow_remote=True)
+    def get_trend_signal(self, category: str, job_id: str | None = None) -> TrendSignal:
+        snapshot = self._load_snapshot(category, allow_remote=True, job_id=job_id)
         return snapshot.signal
 
-    def get_macro_trends(self) -> list[TrendDashboardItem]:
+    def get_macro_trends(self, job_id: str | None = None) -> list[TrendDashboardItem]:
         items: list[TrendDashboardItem] = []
-        categories = self._resolve_trend_categories()
+        categories = self._resolve_trend_categories(job_id=job_id)
 
         def load_category(category: str) -> TrendDashboardItem | None:
             try:
-                snapshot = self._load_snapshot(category, allow_remote=True)
+                snapshot = self._load_snapshot(category, allow_remote=True, job_id=job_id)
             except TrendDataUnavailableError:
                 return None
 
@@ -187,19 +187,39 @@ class TrendService:
 
         return items
 
-    def get_rising_keywords(self, category: str, limit: int = 10) -> list[TrendKeywordItem]:
-        snapshot = self._load_snapshot(category, allow_remote=True)
+    def get_rising_keywords(
+        self,
+        category: str,
+        limit: int = 10,
+        job_id: str | None = None
+    ) -> list[TrendKeywordItem]:
+        snapshot = self._load_snapshot(category, allow_remote=True, job_id=job_id)
         return snapshot.keywords[: max(1, min(50, limit))]
 
-    def get_timeline(self, category: str, months: int = 12) -> list[TrendTimelinePoint]:
-        snapshot = self._load_snapshot(category, allow_remote=True)
+    def get_timeline(
+        self,
+        category: str,
+        months: int = 12,
+        job_id: str | None = None
+    ) -> list[TrendTimelinePoint]:
+        snapshot = self._load_snapshot(category, allow_remote=True, job_id=job_id)
         return snapshot.timeline[-max(1, min(12, months)) :]
 
-    def _load_snapshot(self, category: str, allow_remote: bool = True) -> TrendSnapshot:
+    def _load_snapshot(
+        self,
+        category: str,
+        allow_remote: bool = True,
+        job_id: str | None = None
+    ) -> TrendSnapshot:
         normalized_category = self._normalize_category(category)
-        preferred_region = self._resolve_catalog_region(normalized_category)
-        query_term = self._resolve_catalog_query(normalized_category, preferred_region=preferred_region)
-        cache_key = self._snapshot_cache_key(normalized_category, query_term)
+        normalized_job_id = (job_id or '').strip()
+        preferred_region = self._resolve_catalog_region(normalized_category, job_id=normalized_job_id)
+        query_term = self._resolve_catalog_query(
+            normalized_category,
+            preferred_region=preferred_region,
+            job_id=normalized_job_id
+        )
+        cache_key = self._snapshot_cache_key(normalized_category, query_term, job_id=normalized_job_id)
         now = datetime.now(timezone.utc)
         cached = self._cache.get(cache_key)
 
@@ -249,7 +269,13 @@ class TrendService:
 
         if snapshot:
             self._cache[cache_key] = snapshot
-            self._save_snapshot_to_store(cache_key, normalized_category, query_term, snapshot)
+            self._save_snapshot_to_store(
+                cache_key,
+                normalized_category,
+                query_term,
+                snapshot,
+                job_id=normalized_job_id
+            )
             return snapshot
 
         if cached and self._is_within_age(cached.fetched_at, settings.trend_stale_fallback_max_age_seconds, now=now):
@@ -268,13 +294,17 @@ class TrendService:
             f'Live trend data is unavailable for {normalized_category}. Check provider connectivity and credentials.'
         )
 
-    def _resolve_trend_categories(self) -> list[str]:
+    def _resolve_trend_categories(self, job_id: str | None = None) -> list[str]:
         if self._records_collection is None:
             return list(self.CATEGORY_ORDER)
 
+        query: dict[str, Any] = {}
+        if job_id:
+            query['job_id'] = job_id
+
         try:
             records = list(
-                self._records_collection.find({}, {'_id': 0, 'category': 1})
+                self._records_collection.find(query, {'_id': 0, 'category': 1})
                 .sort('created_at', -1)
                 .limit(600)
             )
@@ -300,20 +330,29 @@ class TrendService:
 
         return ordered[: self.MAX_TREND_CATEGORIES]
 
-    def _resolve_catalog_query(self, category: str, preferred_region: str | None = None) -> str:
+    def _resolve_catalog_query(
+        self,
+        category: str,
+        preferred_region: str | None = None,
+        job_id: str | None = None
+    ) -> str:
         default_query = self._category_terms.get(category, f'{category} india fashion')
         if self._records_collection is None:
             return default_query
 
+        query_filter: dict[str, Any] = {
+            'category': {
+                '$regex': f'^{re.escape(category)}$',
+                '$options': 'i'
+            }
+        }
+        if job_id:
+            query_filter['job_id'] = job_id
+
         try:
             records = list(
                 self._records_collection.find(
-                    {
-                        'category': {
-                            '$regex': f'^{re.escape(category)}$',
-                            '$options': 'i'
-                        }
-                    },
+                    query_filter,
                     {'_id': 0, 'brand': 1, 'name': 1}
                 )
                 .sort('created_at', -1)
@@ -361,19 +400,23 @@ class TrendService:
 
         return resolved[:120]
 
-    def _resolve_catalog_region(self, category: str) -> str | None:
+    def _resolve_catalog_region(self, category: str, job_id: str | None = None) -> str | None:
         if self._records_collection is None:
             return None
+
+        query_filter: dict[str, Any] = {
+            'category': {
+                '$regex': f'^{re.escape(category)}$',
+                '$options': 'i'
+            }
+        }
+        if job_id:
+            query_filter['job_id'] = job_id
 
         try:
             records = list(
                 self._records_collection.find(
-                    {
-                        'category': {
-                            '$regex': f'^{re.escape(category)}$',
-                            '$options': 'i'
-                        }
-                    },
+                    query_filter,
                     {'_id': 0, 'top_region': 1}
                 )
                 .sort('created_at', -1)
@@ -431,14 +474,19 @@ class TrendService:
         )
 
     @staticmethod
-    def _snapshot_cache_key(category: str, query_term: str | None = None) -> str:
+    def _snapshot_cache_key(
+        category: str,
+        query_term: str | None = None,
+        job_id: str | None = None
+    ) -> str:
         geo = settings.trends_geo.strip().upper() or 'IN'
         normalized_category = category.strip().lower()
         normalized_query = re.sub(r'[^a-z0-9]+', '-', str(query_term or '').lower()).strip('-')
+        normalized_job = re.sub(r'[^a-z0-9]+', '-', str(job_id or '').lower()).strip('-') or 'all-jobs'
         if len(normalized_query) > 64:
             normalized_query = normalized_query[:64]
 
-        return f'{geo}::{normalized_category}::{normalized_query or "default"}'
+        return f'{geo}::{normalized_job}::{normalized_category}::{normalized_query or "default"}'
 
     def _load_snapshot_from_store(
         self,
@@ -523,13 +571,15 @@ class TrendService:
         cache_key: str,
         category: str,
         query_term: str,
-        snapshot: TrendSnapshot
+        snapshot: TrendSnapshot,
+        job_id: str | None = None
     ) -> None:
         if self._snapshot_collection is None:
             return
 
         document = {
             'cache_key': cache_key,
+            'job_id': job_id or None,
             'category': category,
             'query_term': query_term,
             'geo': settings.trends_geo,

@@ -233,7 +233,7 @@ function computeSignalScore(trend) {
   return Math.round((growthScore + confidenceScore) / 2);
 }
 
-export default function TrendsView() {
+export default function TrendsView({ selectedCatalogJobId = '' }) {
   const [marketTrends, setMarketTrends] = useState([]);
   const [risingKeywords, setRisingKeywords] = useState([]);
   const [timelinePoints, setTimelinePoints] = useState([]);
@@ -246,13 +246,19 @@ export default function TrendsView() {
   const [keywordQuery, setKeywordQuery] = useState('');
 
   useEffect(() => {
+    setSelectedRegion('All Regions');
+    setSelectedCategory('');
+    setKeywordQuery('');
+  }, [selectedCatalogJobId]);
+
+  useEffect(() => {
     let active = true;
 
     async function loadTrendSignals() {
       try {
         setIsLoading(true);
         setError('');
-        const trendData = await listTrendSignals();
+        const trendData = await listTrendSignals(selectedCatalogJobId);
 
         if (!active) {
           return;
@@ -294,7 +300,7 @@ export default function TrendsView() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [selectedCatalogJobId]);
 
   const regions = useMemo(() => {
     const available = marketTrends
@@ -349,8 +355,8 @@ export default function TrendsView() {
       try {
         setIsDetailLoading(true);
         const [keywords, timeline] = await Promise.all([
-          listTrendKeywords(activeTrend.category, 20),
-          getTrendTimeline(activeTrend.category, FULL_TIMELINE_MONTHS)
+          listTrendKeywords(activeTrend.category, 20, selectedCatalogJobId),
+          getTrendTimeline(activeTrend.category, FULL_TIMELINE_MONTHS, selectedCatalogJobId)
         ]);
 
         if (!active) {
@@ -376,7 +382,7 @@ export default function TrendsView() {
     return () => {
       active = false;
     };
-  }, [activeTrend?.category]);
+  }, [activeTrend?.category, selectedCatalogJobId]);
 
   const filteredKeywords = useMemo(() => {
     const normalizedQuery = keywordQuery.trim().toLowerCase();

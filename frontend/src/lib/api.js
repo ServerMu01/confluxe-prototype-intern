@@ -132,21 +132,33 @@ export async function listIntelligenceProducts({ action, category, jobId } = {})
   return request(`/intelligence/products${query ? `?${query}` : ''}`);
 }
 
-export async function listTrendSignals() {
-  return request('/intelligence/trends', {}, TREND_REQUEST_TIMEOUT_MS);
+export async function listTrendSignals(jobId) {
+  const params = new URLSearchParams();
+  if (jobId) {
+    params.set('job_id', jobId);
+  }
+
+  const query = params.toString();
+  return request(`/intelligence/trends${query ? `?${query}` : ''}`, {}, TREND_REQUEST_TIMEOUT_MS);
 }
 
-export async function listTrendKeywords(category, limit = 12) {
+export async function listTrendKeywords(category, limit = 12, jobId) {
   const params = new URLSearchParams();
   params.set('category', category);
   params.set('limit', String(limit));
+  if (jobId) {
+    params.set('job_id', jobId);
+  }
   return request(`/intelligence/trends/keywords?${params.toString()}`, {}, TREND_REQUEST_TIMEOUT_MS);
 }
 
-export async function getTrendTimeline(category, months = 12) {
+export async function getTrendTimeline(category, months = 12, jobId) {
   const params = new URLSearchParams();
   params.set('category', category);
   params.set('months', String(months));
+  if (jobId) {
+    params.set('job_id', jobId);
+  }
   return request(`/intelligence/trends/timeline?${params.toString()}`, {}, TREND_REQUEST_TIMEOUT_MS);
 }
 
