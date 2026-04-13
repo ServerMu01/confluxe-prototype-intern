@@ -3,11 +3,19 @@ import { ArrowUpRight, Filter, MapPin, Network, Search, TrendingDown, TrendingUp
 import { getTrendTimeline, listIntelligenceProducts, listTrendKeywords, listTrendSignals } from '@/lib/api';
 
 const FULL_TIMELINE_MONTHS = 12;
+const CATALOG_SEARCH_MIN_LENGTH = 3;
 const TIME_WINDOWS = [
   { id: '3M', months: 3 },
   { id: '6M', months: 6 },
   { id: '12M', months: 12 }
 ];
+
+const CATEGORY_MATCH_ALIASES = {
+  shoes: ['footwear', 'sneaker', 'sneakers'],
+  footwear: ['shoes', 'sneaker', 'sneakers'],
+  sneaker: ['sneakers', 'shoes', 'footwear'],
+  sneakers: ['sneaker', 'shoes', 'footwear']
+};
 
 function getWindowMonths(windowId) {
   return TIME_WINDOWS.find((window) => window.id === windowId)?.months ?? 12;
@@ -233,6 +241,36 @@ function computeSignalScore(trend) {
   return Math.round((growthScore + confidenceScore) / 2);
 }
 
+function normalizeCategoryKey(value) {
+  return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
+function categoriesAreRelated(left, right) {
+  const leftKey = normalizeCategoryKey(left);
+  const rightKey = normalizeCategoryKey(right);
+
+  if (!leftKey || !rightKey) {
+    return false;
+  }
+
+  if (leftKey.includes(rightKey) || rightKey.includes(leftKey)) {
+    return true;
+  }
+
+  const leftAliases = CATEGORY_MATCH_ALIASES[leftKey] || [];
+  const rightAliases = CATEGORY_MATCH_ALIASES[rightKey] || [];
+
+  if (leftAliases.some((alias) => alias === rightKey || alias.includes(rightKey) || rightKey.includes(alias))) {
+    return true;
+  }
+
+  if (rightAliases.some((alias) => alias === leftKey || alias.includes(leftKey) || leftKey.includes(alias))) {
+    return true;
+  }
+
+  return false;
+}
+
 export default function TrendsView({ selectedCatalogJobId = '' }) {
   const [marketTrends, setMarketTrends] = useState([]);
   const [catalogRecords, setCatalogRecords] = useState([]);
@@ -355,9 +393,48 @@ export default function TrendsView({ selectedCatalogJobId = '' }) {
   }, [regions, selectedRegion]);
 
   const normalizedCatalogSearch = catalogSearch.trim().toLowerCase();
+  const shouldFilterByCatalogSearch = normalizedCatalogSearch.length >= CATALOG_SEARCH_MIN_LENGTH;
+
+  const catalogSuggestions = useMemo(() => {
+    const suggestionMap = new Map();
+
+    const addSuggestion = (rawValue, weight = 1) => {
+      const value = String(rawValue || '').trim();
+      if (!value || value.length < 2) {
+        return;
+      }
+
+      const key = value.toLowerCase();
+      const existing = suggestionMap.get(key);
+      if (existing) {
+        existing.weight += weight;
+        return;
+      }
+
+      suggestionMap.set(key, { value, weight });
+    };
+
+    catalogRecords.forEach((record) => {
+      addSuggestion(record.category, 4);
+      addSuggestion(record.brand, 2);
+      addSuggestion(record.name, 1);
+    });
+
+    marketTrends.forEach((trend) => {
+      addSuggestion(trend.category, 5);
+    });
+
+    let suggestions = [...suggestionMap.values()];
+    if (normalizedCatalogSearch) {
+      suggestions = suggestions.filter((entry) => entry.value.toLowerCase().includes(normalizedCatalogSearch));
+    }
+
+    suggestions.sort((left, right) => right.weight - left.weight || left.value.length - right.value.length);
+    return suggestions.map((entry) => entry.value).slice(0, 14);
+  }, [catalogRecords, marketTrends, normalizedCatalogSearch]);
 
   const matchedCatalogCategories = useMemo(() => {
-    if (!normalizedCatalogSearch) {
+    if (!shouldFilterByCatalogSearch) {
       return null;
     }
 
@@ -385,23 +462,43 @@ export default function TrendsView({ selectedCatalogJobId = '' }) {
     });
 
     return matched;
-  }, [catalogRecords, marketTrends, normalizedCatalogSearch]);
+  }, [catalogRecords, marketTrends, normalizedCatalogSearch, shouldFilterByCatalogSearch]);
 
   const filteredTrends = useMemo(() => {
     const byRegion = selectedRegion === 'All Regions'
       ? marketTrends
       : marketTrends.filter((trend) => trend.region === selectedRegion);
 
-    if (!normalizedCatalogSearch) {
+    if (!shouldFilterByCatalogSearch) {
       return byRegion;
     }
 
     if (!matchedCatalogCategories || matchedCatalogCategories.size === 0) {
-      return [];
+      return byRegion;
     }
 
-    return byRegion.filter((trend) => matchedCatalogCategories.has(String(trend.category || '').trim().toLowerCase()));
-  }, [marketTrends, selectedRegion, normalizedCatalogSearch, matchedCatalogCategories]);
+    const narrowed = byRegion.filter((trend) => {
+      const trendCategory = String(trend.category || '').trim();
+      if (!trendCategory) {
+        return false;
+      }
+
+      const trendCategoryLower = trendCategory.toLowerCase();
+      if (trendCategoryLower.includes(normalizedCatalogSearch)) {
+        return true;
+      }
+
+      for (const catalogCategory of matchedCatalogCategories) {
+        if (categoriesAreRelated(trendCategoryLower, catalogCategory)) {
+          return true;
+        }
+      }
+
+      return false;
+    });
+
+    return narrowed.length > 0 ? narrowed : byRegion;
+  }, [marketTrends, selectedRegion, normalizedCatalogSearch, matchedCatalogCategories, shouldFilterByCatalogSearch]);
 
   const activeTrend = useMemo(() => {
     if (filteredTrends.length === 0) {
@@ -498,12 +595,9 @@ export default function TrendsView({ selectedCatalogJobId = '' }) {
   }
 
   if (!activeTrend) {
-    const searchText = catalogSearch.trim();
-    const regionMessage = searchText
-      ? `No catalog trend matches found for "${searchText}".`
-      : selectedRegion !== 'All Regions'
-        ? `No trend signals found for ${selectedRegion}.`
-        : 'No live trend data available for this selection.';
+    const regionMessage = selectedRegion !== 'All Regions'
+      ? `No trend signals found for ${selectedRegion}.`
+      : 'No live trend data available for this selection.';
 
     return (
       <div className="max-w-[1400px] animate-in fade-in duration-500">
@@ -611,12 +705,18 @@ export default function TrendsView({ selectedCatalogJobId = '' }) {
             <label className="relative block">
               <Search size={12} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#888888]" />
               <input
+                list="catalog-search-suggestions"
                 type="text"
                 value={catalogSearch}
                 onChange={(event) => setCatalogSearch(event.target.value)}
-                placeholder="Search within catalog data"
+                placeholder="Search within catalog data (3+ chars)"
                 className="w-full border border-[#E5E2D9] py-2 pl-8 pr-3 text-xs text-[#111111] placeholder-[#888888] focus:border-[#111111] focus:outline-none sm:w-64"
               />
+              <datalist id="catalog-search-suggestions">
+                {catalogSuggestions.map((suggestion) => (
+                  <option key={suggestion} value={suggestion} />
+                ))}
+              </datalist>
             </label>
           </div>
 
