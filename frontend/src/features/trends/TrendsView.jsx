@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowUpRight, Filter, MapPin, Network, Search, TrendingDown, TrendingUp } from 'lucide-react';
-import { getTrendTimeline, listTrendKeywords, listTrendSignals } from '@/lib/api';
+import { getTrendTimeline, listIntelligenceProducts, listTrendKeywords, listTrendSignals } from '@/lib/api';
 
 const FULL_TIMELINE_MONTHS = 12;
 const TIME_WINDOWS = [
@@ -57,11 +57,11 @@ function buildInsightNarrative(activeTrend) {
   );
 }
 
-function buildSourceList(activeTrend, queryOverride = '') {
+function buildSourceList(activeTrend) {
   const providerLabel = formatProvider(activeTrend.provider);
   return [
     `${providerLabel} timeline feed (${FULL_TIMELINE_MONTHS} months)`,
-    queryOverride ? `"${queryOverride}" query trend stream` : `${activeTrend.category} related query stream`,
+    `${activeTrend.category} related query stream`,
     `${activeTrend.region} regional interest heatmap`
   ];
 }
@@ -233,12 +233,9 @@ function computeSignalScore(trend) {
   return Math.round((growthScore + confidenceScore) / 2);
 }
 
-function normalizeAnalysisQuery(value) {
-  return String(value || '').trim().replace(/\s+/g, ' ').slice(0, 120);
-}
-
 export default function TrendsView({ selectedCatalogJobId = '' }) {
   const [marketTrends, setMarketTrends] = useState([]);
+  const [catalogRecords, setCatalogRecords] = useState([]);
   const [risingKeywords, setRisingKeywords] = useState([]);
   const [timelinePoints, setTimelinePoints] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -247,34 +244,48 @@ export default function TrendsView({ selectedCatalogJobId = '' }) {
   const [selectedWindow, setSelectedWindow] = useState('6M');
   const [selectedRegion, setSelectedRegion] = useState('All Regions');
   const [selectedCategory, setSelectedCategory] = useState('');
+  const [catalogSearch, setCatalogSearch] = useState('');
   const [keywordFilter, setKeywordFilter] = useState('');
-  const [analysisQueryInput, setAnalysisQueryInput] = useState('');
-  const [analysisQuery, setAnalysisQuery] = useState('');
 
   useEffect(() => {
     setSelectedRegion('All Regions');
     setSelectedCategory('');
+    setCatalogSearch('');
     setKeywordFilter('');
-    setAnalysisQueryInput('');
-    setAnalysisQuery('');
   }, [selectedCatalogJobId]);
 
-  const normalizedAnalysisInput = normalizeAnalysisQuery(analysisQueryInput);
-  const canApplyAnalysisQuery =
-    normalizedAnalysisInput.length >= 2 && normalizedAnalysisInput !== analysisQuery;
+  useEffect(() => {
+    let active = true;
 
-  function applyAnalysisQuery() {
-    if (!canApplyAnalysisQuery) {
-      return;
+    async function loadCatalogRecords() {
+      try {
+        const catalogData = await listIntelligenceProducts({
+          jobId: selectedCatalogJobId || undefined
+        });
+
+        if (!active || !Array.isArray(catalogData)) {
+          return;
+        }
+
+        const compactRecords = catalogData.slice(0, 1500).map((item) => ({
+          name: String(item?.normalized_product?.name || ''),
+          brand: String(item?.normalized_product?.brand || ''),
+          category: String(item?.normalized_product?.category || '')
+        }));
+        setCatalogRecords(compactRecords);
+      } catch {
+        if (active) {
+          setCatalogRecords([]);
+        }
+      }
     }
 
-    setAnalysisQuery(normalizedAnalysisInput);
-  }
+    loadCatalogRecords();
 
-  function clearAnalysisQuery() {
-    setAnalysisQuery('');
-    setAnalysisQueryInput('');
-  }
+    return () => {
+      active = false;
+    };
+  }, [selectedCatalogJobId]);
 
   useEffect(() => {
     let active = true;
@@ -284,8 +295,7 @@ export default function TrendsView({ selectedCatalogJobId = '' }) {
         setIsLoading(true);
         setError('');
         const trendData = await listTrendSignals({
-          jobId: selectedCatalogJobId,
-          query: analysisQuery || undefined
+          jobId: selectedCatalogJobId || undefined
         });
 
         if (!active) {
@@ -295,11 +305,7 @@ export default function TrendsView({ selectedCatalogJobId = '' }) {
         if (!Array.isArray(trendData) || trendData.length === 0) {
           setMarketTrends([]);
           setSelectedCategory('');
-          setError(
-            analysisQuery
-              ? `No live trend data was returned for "${analysisQuery}". Try a broader query.`
-              : 'No live trend data was returned by providers.'
-          );
+          setError('No live trend data was returned by providers.');
           return;
         }
 
@@ -332,7 +338,7 @@ export default function TrendsView({ selectedCatalogJobId = '' }) {
     return () => {
       active = false;
     };
-  }, [selectedCatalogJobId, analysisQuery]);
+  }, [selectedCatalogJobId]);
 
   const regions = useMemo(() => {
     const available = marketTrends
@@ -348,13 +354,54 @@ export default function TrendsView({ selectedCatalogJobId = '' }) {
     }
   }, [regions, selectedRegion]);
 
-  const filteredTrends = useMemo(() => {
-    if (selectedRegion === 'All Regions') {
-      return marketTrends;
+  const normalizedCatalogSearch = catalogSearch.trim().toLowerCase();
+
+  const matchedCatalogCategories = useMemo(() => {
+    if (!normalizedCatalogSearch) {
+      return null;
     }
 
-    return marketTrends.filter((trend) => trend.region === selectedRegion);
-  }, [marketTrends, selectedRegion]);
+    const matched = new Set();
+
+    catalogRecords.forEach((record) => {
+      const category = String(record?.category || '').trim();
+      if (!category) {
+        return;
+      }
+
+      const nameMatch = String(record?.name || '').toLowerCase().includes(normalizedCatalogSearch);
+      const brandMatch = String(record?.brand || '').toLowerCase().includes(normalizedCatalogSearch);
+      const categoryMatch = category.toLowerCase().includes(normalizedCatalogSearch);
+      if (nameMatch || brandMatch || categoryMatch) {
+        matched.add(category.toLowerCase());
+      }
+    });
+
+    marketTrends.forEach((trend) => {
+      const category = String(trend?.category || '').trim().toLowerCase();
+      if (category && category.includes(normalizedCatalogSearch)) {
+        matched.add(category);
+      }
+    });
+
+    return matched;
+  }, [catalogRecords, marketTrends, normalizedCatalogSearch]);
+
+  const filteredTrends = useMemo(() => {
+    const byRegion = selectedRegion === 'All Regions'
+      ? marketTrends
+      : marketTrends.filter((trend) => trend.region === selectedRegion);
+
+    if (!normalizedCatalogSearch) {
+      return byRegion;
+    }
+
+    if (!matchedCatalogCategories || matchedCatalogCategories.size === 0) {
+      return [];
+    }
+
+    return byRegion.filter((trend) => matchedCatalogCategories.has(String(trend.category || '').trim().toLowerCase()));
+  }, [marketTrends, selectedRegion, normalizedCatalogSearch, matchedCatalogCategories]);
 
   const activeTrend = useMemo(() => {
     if (filteredTrends.length === 0) {
@@ -388,12 +435,10 @@ export default function TrendsView({ selectedCatalogJobId = '' }) {
         setIsDetailLoading(true);
         const [keywords, timeline] = await Promise.all([
           listTrendKeywords(activeTrend.category, 20, {
-            jobId: selectedCatalogJobId,
-            query: analysisQuery || undefined
+            jobId: selectedCatalogJobId || undefined
           }),
           getTrendTimeline(activeTrend.category, FULL_TIMELINE_MONTHS, {
-            jobId: selectedCatalogJobId,
-            query: analysisQuery || undefined
+            jobId: selectedCatalogJobId || undefined
           })
         ]);
 
@@ -420,7 +465,7 @@ export default function TrendsView({ selectedCatalogJobId = '' }) {
     return () => {
       active = false;
     };
-  }, [activeTrend?.category, selectedCatalogJobId, analysisQuery]);
+  }, [activeTrend?.category, selectedCatalogJobId]);
 
   const filteredKeywords = useMemo(() => {
     const normalizedQuery = keywordFilter.trim().toLowerCase();
@@ -453,9 +498,12 @@ export default function TrendsView({ selectedCatalogJobId = '' }) {
   }
 
   if (!activeTrend) {
-    const regionMessage = selectedRegion !== 'All Regions'
-      ? `No trend signals found for ${selectedRegion}.`
-      : 'No live trend data available for this selection.';
+    const searchText = catalogSearch.trim();
+    const regionMessage = searchText
+      ? `No catalog trend matches found for "${searchText}".`
+      : selectedRegion !== 'All Regions'
+        ? `No trend signals found for ${selectedRegion}.`
+        : 'No live trend data available for this selection.';
 
     return (
       <div className="max-w-[1400px] animate-in fade-in duration-500">
@@ -486,7 +534,7 @@ export default function TrendsView({ selectedCatalogJobId = '' }) {
     filteredTrends.reduce((sum, trend) => sum + parseVolumeToK(trend.volume), 0)
   );
   const liveProvider = formatProvider(activeTrend.provider || marketTrends[0]?.provider);
-  const sourceList = buildSourceList(activeTrend, analysisQuery);
+  const sourceList = buildSourceList(activeTrend);
   const insightNarrative = buildInsightNarrative(activeTrend);
   const windowStartLabel = chartSeries[0]?.month || 'N/A';
   const windowEndLabel = chartSeries[chartSeries.length - 1]?.month || 'N/A';
@@ -564,43 +612,12 @@ export default function TrendsView({ selectedCatalogJobId = '' }) {
               <Search size={12} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#888888]" />
               <input
                 type="text"
-                value={analysisQueryInput}
-                onChange={(event) => setAnalysisQueryInput(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') {
-                    event.preventDefault();
-                    applyAnalysisQuery();
-                  }
-                }}
-                placeholder="Analyze specific search query"
+                value={catalogSearch}
+                onChange={(event) => setCatalogSearch(event.target.value)}
+                placeholder="Search within catalog data"
                 className="w-full border border-[#E5E2D9] py-2 pl-8 pr-3 text-xs text-[#111111] placeholder-[#888888] focus:border-[#111111] focus:outline-none sm:w-64"
               />
             </label>
-
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={applyAnalysisQuery}
-                disabled={!canApplyAnalysisQuery}
-                className={`px-3 py-2 text-[10px] font-bold uppercase tracking-widest transition-colors ${
-                  canApplyAnalysisQuery
-                    ? 'bg-[#111111] text-white hover:bg-[#E32929]'
-                    : 'cursor-not-allowed bg-[#E5E2D9] text-[#888888]'
-                }`}
-              >
-                Apply Query
-              </button>
-
-              {analysisQuery && (
-                <button
-                  type="button"
-                  onClick={clearAnalysisQuery}
-                  className="border border-[#E5E2D9] px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-[#555555] transition-colors hover:border-[#111111] hover:text-[#111111]"
-                >
-                  Clear
-                </button>
-              )}
-            </div>
           </div>
 
           <label className="relative block">
@@ -614,9 +631,9 @@ export default function TrendsView({ selectedCatalogJobId = '' }) {
             />
           </label>
 
-          {analysisQuery && (
+          {catalogSearch.trim() && (
             <p className="text-[10px] font-bold uppercase tracking-widest text-[#555555]">
-              Custom Analysis Query: "{analysisQuery}"
+              Catalog Search: "{catalogSearch.trim()}"
             </p>
           )}
         </div>
@@ -898,7 +915,7 @@ export default function TrendsView({ selectedCatalogJobId = '' }) {
               <div>
                 <h2 className="text-lg font-serif text-[#111111]">Search Interest Over Time</h2>
                 <p className="mt-1 text-[10px] font-bold uppercase tracking-widest text-[#888888]">
-                  Macro Indicator: {analysisQuery ? `"${analysisQuery}"` : activeTrend.category}
+                  Macro Indicator: {activeTrend.category}
                 </p>
                 <p className="mt-1 text-[9px] font-bold uppercase tracking-widest text-[#AAA29A]">
                   Window: {selectedWindow} ({windowStartLabel} to {windowEndLabel})
