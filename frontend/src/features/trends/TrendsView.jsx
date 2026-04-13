@@ -284,12 +284,14 @@ export default function TrendsView({ selectedCatalogJobId = '' }) {
   const [selectedCategory, setSelectedCategory] = useState('');
   const [catalogSearch, setCatalogSearch] = useState('');
   const [keywordFilter, setKeywordFilter] = useState('');
+  const [apiQuery, setApiQuery] = useState('');
 
   useEffect(() => {
     setSelectedRegion('All Over India');
     setSelectedCategory('');
     setCatalogSearch('');
     setKeywordFilter('');
+    setApiQuery('');
   }, [selectedCatalogJobId]);
 
   useEffect(() => {
@@ -333,7 +335,8 @@ export default function TrendsView({ selectedCatalogJobId = '' }) {
         setIsLoading(true);
         setError('');
         const trendData = await listTrendSignals({
-          jobId: selectedCatalogJobId || undefined
+          jobId: selectedCatalogJobId || undefined,
+          query: apiQuery || undefined
         });
 
         if (!active) {
@@ -376,7 +379,7 @@ export default function TrendsView({ selectedCatalogJobId = '' }) {
     return () => {
       active = false;
     };
-  }, [selectedCatalogJobId]);
+  }, [selectedCatalogJobId, apiQuery]);
 
   const regions = useMemo(() => {
     const available = marketTrends
@@ -602,10 +605,32 @@ export default function TrendsView({ selectedCatalogJobId = '' }) {
     }
 
     return (
-      <div className="max-w-[1400px] animate-in fade-in duration-500">
-        <div className="border border-[#E5E2D9] bg-white p-8 text-center shadow-sm">
-          <h2 className="font-serif text-xl text-[#111111]">Trend Signals</h2>
-          <p className="mt-2 text-sm text-[#555555]">{error || emptyMessage}</p>
+      <div className="mx-auto w-full max-w-[1400px] animate-in fade-in duration-500">
+        <div className="border border-[#E5E2D9] bg-white p-8 text-center shadow-sm sm:p-12 md:p-16">
+          <h2 className="font-serif text-2xl text-[#111111]">No Trends Found</h2>
+          <p className="mx-auto mt-3 max-w-md text-sm text-[#555555] sm:text-base">{error || emptyMessage}</p>
+
+          <div className="mt-8 flex flex-col items-center justify-center gap-4 sm:flex-row">
+            {shouldFilterByCatalogSearch && (
+              <button
+                type="button"
+                onClick={() => setApiQuery(catalogSearch)}
+                className="bg-[#111111] px-6 py-3 text-[10px] font-bold uppercase tracking-widest text-white transition-colors hover:bg-[#E32929] w-full sm:w-auto"
+              >
+                Fetch Live Internet Trends
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                setCatalogSearch('');
+                setApiQuery('');
+              }}
+              className="border border-[#E5E2D9] bg-white px-6 py-3 text-[10px] font-bold uppercase tracking-widest text-[#111111] transition-colors hover:border-[#111111] hover:bg-[#FAF9F5] w-full sm:w-auto"
+            >
+              Clear Search
+            </button>
+          </div>
         </div>
       </div>
     );
