@@ -8,17 +8,6 @@ const TIME_WINDOWS = [
   { id: '6M', months: 6 },
   { id: '12M', months: 12 }
 ];
-const TIER_ONE_REGION_OPTIONS = [
-  'All Over India',
-  'Delhi NCR',
-  'Mumbai',
-  'Bengaluru',
-  'Hyderabad',
-  'Chennai',
-  'Pune',
-  'Kolkata',
-  'Ahmedabad'
-];
 
 function getWindowMonths(windowId) {
   return TIME_WINDOWS.find((window) => window.id === windowId)?.months ?? 12;
@@ -308,9 +297,18 @@ export default function TrendsView() {
   }, []);
 
   const regions = useMemo(() => {
-    const merged = [...TIER_ONE_REGION_OPTIONS, ...marketTrends.map((trend) => trend.region)];
-    return ['All Regions', ...new Set(merged.filter((region) => String(region || '').trim() !== ''))];
+    const available = marketTrends
+      .map((trend) => String(trend.region || '').trim())
+      .filter((region) => region !== '');
+
+    return ['All Regions', ...new Set(available)];
   }, [marketTrends]);
+
+  useEffect(() => {
+    if (!regions.includes(selectedRegion)) {
+      setSelectedRegion('All Regions');
+    }
+  }, [regions, selectedRegion]);
 
   const filteredTrends = useMemo(() => {
     if (selectedRegion === 'All Regions') {

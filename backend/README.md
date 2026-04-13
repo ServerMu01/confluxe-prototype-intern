@@ -32,6 +32,7 @@ uvicorn app.main:app --reload --port 8000
 - `TREND_CACHE_TTL_SECONDS` (default: `900`)
 - `TREND_PERSISTED_CACHE_TTL_SECONDS` (default: `43200`; 12h persisted cache freshness for API cost reduction)
 - `TREND_STALE_FALLBACK_MAX_AGE_SECONDS` (default: `604800`; 7d max age for last-success real snapshot fallback)
+- `TREND_ENABLE_GOOGLE_NEWS_FALLBACK` (default: `false`; optional last-resort free fallback)
 - `TREND_GOOGLE_NEWS_TIMEOUT_SECONDS` (default: `6`; timeout for free Google News RSS trend fallback)
 - `TREND_GOOGLE_NEWS_HL` (default: `en-IN`)
 - `TREND_GOOGLE_NEWS_GL` (default: `IN`)
@@ -68,7 +69,7 @@ uvicorn app.main:app --reload --port 8000
 	1. SerpApi Google Trends (if `SERPAPI_API_KEY` is set)
 	2. Apify Google Trends Actor (`apify/google-trends-scraper`)
 	3. Pytrends (Google Trends unofficial API)
-	4. Google News RSS (free, no-auth fallback)
+- Optional last resort: Google News RSS (only when `TREND_ENABLE_GOOGLE_NEWS_FALLBACK=true`)
 - Apify Actor IDs are accepted in either slash form (`apify/google-trends-scraper`) or tilde form (`apify~google-trends-scraper`).
 
 ### Catalog-Aware Trend Signals

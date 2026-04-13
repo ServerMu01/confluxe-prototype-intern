@@ -204,6 +204,13 @@ class TrendService:
         cached = self._cache.get(cache_key)
 
         if cached:
+            if (
+                not settings.trend_enable_google_news_fallback
+                and str(cached.provider).startswith('google_news_rss')
+            ):
+                cached = None
+
+        if cached:
             if self._is_within_age(cached.fetched_at, settings.trend_cache_ttl_seconds, now=now):
                 return cached
 
@@ -222,8 +229,7 @@ class TrendService:
             provider_chain = (
                 self._build_serpapi_snapshot,
                 self._build_apify_snapshot,
-                self._build_pytrends_snapshot,
-                self._build_google_news_rss_snapshot
+                self._build_pytrends_snapshot
             )
             for provider_builder in provider_chain:
                 snapshot = provider_builder(
@@ -233,6 +239,13 @@ class TrendService:
                 )
                 if snapshot:
                     break
+
+            if not snapshot and settings.trend_enable_google_news_fallback:
+                snapshot = self._build_google_news_rss_snapshot(
+                    normalized_category,
+                    query=query_term,
+                    preferred_region=preferred_region
+                )
 
         if snapshot:
             self._cache[cache_key] = snapshot
@@ -459,6 +472,12 @@ class TrendService:
             return None
 
         if not isinstance(document, dict):
+            return None
+
+        if (
+            not settings.trend_enable_google_news_fallback
+            and str(document.get('provider') or '').startswith('google_news_rss')
+        ):
             return None
 
         fetched_at = document.get('fetched_at')

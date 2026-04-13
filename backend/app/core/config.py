@@ -35,6 +35,10 @@ class Settings(BaseSettings):
         default=6,
         alias='TREND_GOOGLE_NEWS_TIMEOUT_SECONDS'
     )
+    trend_enable_google_news_fallback: bool = Field(
+        default=False,
+        alias='TREND_ENABLE_GOOGLE_NEWS_FALLBACK'
+    )
     trend_google_news_hl: str = Field(default='en-IN', alias='TREND_GOOGLE_NEWS_HL')
     trend_google_news_gl: str = Field(default='IN', alias='TREND_GOOGLE_NEWS_GL')
     trend_google_news_ceid: str = Field(default='IN:en', alias='TREND_GOOGLE_NEWS_CEID')
