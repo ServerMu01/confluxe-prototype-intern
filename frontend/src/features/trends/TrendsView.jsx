@@ -474,10 +474,10 @@ export default function TrendsView({ selectedCatalogJobId = '' }) {
     }
 
     if (!matchedCatalogCategories || matchedCatalogCategories.size === 0) {
-      return byRegion;
+      return [];
     }
 
-    const narrowed = byRegion.filter((trend) => {
+    return byRegion.filter((trend) => {
       const trendCategory = String(trend.category || '').trim();
       if (!trendCategory) {
         return false;
@@ -496,8 +496,6 @@ export default function TrendsView({ selectedCatalogJobId = '' }) {
 
       return false;
     });
-
-    return narrowed.length > 0 ? narrowed : byRegion;
   }, [marketTrends, selectedRegion, normalizedCatalogSearch, matchedCatalogCategories, shouldFilterByCatalogSearch]);
 
   const activeTrend = useMemo(() => {
@@ -595,15 +593,19 @@ export default function TrendsView({ selectedCatalogJobId = '' }) {
   }
 
   if (!activeTrend) {
-    const regionMessage = selectedRegion !== 'All Over India'
+    let emptyMessage = selectedRegion !== 'All Over India'
       ? `No trend signals found for ${selectedRegion}.`
       : 'No live trend data available for this selection.';
+
+    if (shouldFilterByCatalogSearch) {
+      emptyMessage = `No trend signals match your catalog search for "${catalogSearch}".`;
+    }
 
     return (
       <div className="max-w-[1400px] animate-in fade-in duration-500">
         <div className="border border-[#E5E2D9] bg-white p-8 text-center shadow-sm">
           <h2 className="font-serif text-xl text-[#111111]">Trend Signals</h2>
-          <p className="mt-2 text-sm text-[#555555]">{error || regionMessage}</p>
+          <p className="mt-2 text-sm text-[#555555]">{error || emptyMessage}</p>
         </div>
       </div>
     );
