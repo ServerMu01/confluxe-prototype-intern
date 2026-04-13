@@ -21,6 +21,14 @@ class Settings(BaseSettings):
     )
     trends_geo: str = Field(default='IN', alias='TRENDS_GEO')
     trend_cache_ttl_seconds: int = Field(default=900, alias='TREND_CACHE_TTL_SECONDS')
+    trend_persisted_cache_ttl_seconds: int = Field(
+        default=43200,
+        alias='TREND_PERSISTED_CACHE_TTL_SECONDS'
+    )
+    trend_stale_fallback_max_age_seconds: int = Field(
+        default=604800,
+        alias='TREND_STALE_FALLBACK_MAX_AGE_SECONDS'
+    )
 
     catalog_fast_mode_rows: int = Field(default=100, alias='CATALOG_FAST_MODE_ROWS')
     catalog_insert_batch_size: int = Field(default=25, alias='CATALOG_INSERT_BATCH_SIZE')

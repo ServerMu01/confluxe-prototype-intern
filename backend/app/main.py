@@ -27,14 +27,16 @@ app.add_middleware(
 def on_startup() -> None:
     init_db()
     database = get_database()
+    db_available = is_database_available()
 
-    trend_service = TrendService()
+    trend_snapshot_collection = database['trend_snapshots'] if db_available else None
+    trend_service = TrendService(snapshot_collection=trend_snapshot_collection)
     pipeline = ConfluxePipeline(trend_service=trend_service)
 
     app.state.trend_service = trend_service
     app.state.catalog_service = CatalogService(database, pipeline)
     app.state.copilot_service = CopilotService(database)
-    app.state.db_available = is_database_available()
+    app.state.db_available = db_available
 
 
 @app.on_event('shutdown')

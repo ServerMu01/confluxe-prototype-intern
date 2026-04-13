@@ -74,3 +74,7 @@ def _ensure_indexes() -> None:
     records_collection.create_index([('action', ASCENDING)])
     records_collection.create_index([('trend_score', DESCENDING)])
     records_collection.create_index([('created_at', DESCENDING)])
+
+    trend_snapshots_collection = database['trend_snapshots']
+    trend_snapshots_collection.create_index([('cache_key', ASCENDING)], unique=True)
+    trend_snapshots_collection.create_index([('fetched_at', DESCENDING)])

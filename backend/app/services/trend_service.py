@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 import re
 from typing import Any
@@ -11,6 +11,7 @@ from urllib.parse import quote
 import requests
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_groq import ChatGroq
+from pymongo.collection import Collection
 from pytrends.request import TrendReq
 
 from app.core.config import settings
@@ -71,8 +72,9 @@ class TrendService:
         'gujarat': 'Ahmedabad'
     }
 
-    def __init__(self) -> None:
+    def __init__(self, snapshot_collection: Collection | None = None) -> None:
         self._cache: dict[str, TrendSnapshot] = {}
+        self._snapshot_collection = snapshot_collection
         self._category_terms: dict[str, str] = {
             'Streetwear': 'streetwear fashion india',
             'Activewear': 'activewear india',
@@ -160,13 +162,21 @@ class TrendService:
 
     def _load_snapshot(self, category: str, allow_remote: bool = True) -> TrendSnapshot:
         normalized_category = self._normalize_category(category)
-        cached = self._cache.get(normalized_category)
         now = datetime.now(timezone.utc)
+        cached = self._cache.get(normalized_category)
 
         if cached:
-            age_seconds = (now - cached.fetched_at).total_seconds()
-            if age_seconds <= settings.trend_cache_ttl_seconds:
+            if self._is_within_age(cached.fetched_at, settings.trend_cache_ttl_seconds, now=now):
                 return cached
+
+        persisted_fresh = self._load_snapshot_from_store(
+            normalized_category,
+            max_age_seconds=settings.trend_persisted_cache_ttl_seconds,
+            now=now
+        )
+        if persisted_fresh:
+            self._cache[normalized_category] = persisted_fresh
+            return persisted_fresh
 
         snapshot: TrendSnapshot | None = None
 
@@ -175,13 +185,152 @@ class TrendService:
             if not snapshot:
                 snapshot = self._build_pytrends_snapshot(normalized_category)
 
-        if not snapshot:
-            raise TrendDataUnavailableError(
-                f'Live trend data is unavailable for {normalized_category}. Check provider connectivity and credentials.'
-            )
+        if snapshot:
+            self._cache[normalized_category] = snapshot
+            self._save_snapshot_to_store(normalized_category, snapshot)
+            return snapshot
 
-        self._cache[normalized_category] = snapshot
-        return snapshot
+        if cached and self._is_within_age(cached.fetched_at, settings.trend_stale_fallback_max_age_seconds, now=now):
+            return self._as_cached_snapshot(cached)
+
+        persisted_stale = self._load_snapshot_from_store(
+            normalized_category,
+            max_age_seconds=settings.trend_stale_fallback_max_age_seconds,
+            now=now
+        )
+        if persisted_stale:
+            self._cache[normalized_category] = persisted_stale
+            return self._as_cached_snapshot(persisted_stale)
+
+        raise TrendDataUnavailableError(
+            f'Live trend data is unavailable for {normalized_category}. Check provider connectivity and credentials.'
+        )
+
+    @staticmethod
+    def _is_within_age(fetched_at: datetime, max_age_seconds: int, now: datetime | None = None) -> bool:
+        if max_age_seconds <= 0:
+            return False
+
+        baseline = now or datetime.now(timezone.utc)
+        normalized_fetched_at = TrendService._to_utc_datetime(fetched_at)
+        age_seconds = (baseline - normalized_fetched_at).total_seconds()
+        return age_seconds <= max_age_seconds
+
+    @staticmethod
+    def _to_utc_datetime(value: datetime) -> datetime:
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+
+    @staticmethod
+    def _as_cached_snapshot(snapshot: TrendSnapshot) -> TrendSnapshot:
+        provider = snapshot.provider
+        if 'cached' not in provider.lower():
+            provider = f'{provider}_cached'
+
+        return TrendSnapshot(
+            signal=snapshot.signal,
+            timeline=snapshot.timeline,
+            keywords=snapshot.keywords,
+            provider=provider,
+            fetched_at=snapshot.fetched_at
+        )
+
+    @staticmethod
+    def _snapshot_cache_key(category: str) -> str:
+        geo = settings.trends_geo.strip().upper() or 'IN'
+        normalized = category.strip().lower()
+        return f'{geo}::{normalized}'
+
+    def _load_snapshot_from_store(
+        self,
+        category: str,
+        max_age_seconds: int,
+        now: datetime | None = None
+    ) -> TrendSnapshot | None:
+        if self._snapshot_collection is None or max_age_seconds <= 0:
+            return None
+
+        baseline = now or datetime.now(timezone.utc)
+        threshold = baseline - timedelta(seconds=max_age_seconds)
+
+        try:
+            document = self._snapshot_collection.find_one(
+                {
+                    'cache_key': self._snapshot_cache_key(category),
+                    'fetched_at': {'$gte': threshold}
+                },
+                sort=[('fetched_at', -1)],
+                projection={
+                    '_id': 0,
+                    'provider': 1,
+                    'signal': 1,
+                    'timeline': 1,
+                    'keywords': 1,
+                    'fetched_at': 1
+                }
+            )
+        except Exception:
+            return None
+
+        if not isinstance(document, dict):
+            return None
+
+        fetched_at = document.get('fetched_at')
+        if not isinstance(fetched_at, datetime):
+            return None
+
+        try:
+            signal = TrendSignal.model_validate(document.get('signal') or {})
+            timeline = [
+                TrendTimelinePoint.model_validate(point)
+                for point in (document.get('timeline') or [])
+                if isinstance(point, dict)
+            ]
+            keywords = [
+                TrendKeywordItem.model_validate(item)
+                for item in (document.get('keywords') or [])
+                if isinstance(item, dict)
+            ]
+        except Exception:
+            return None
+
+        if not timeline:
+            return None
+
+        return TrendSnapshot(
+            signal=signal,
+            timeline=timeline,
+            keywords=keywords,
+            provider=str(document.get('provider') or 'unknown_provider'),
+            fetched_at=self._to_utc_datetime(fetched_at)
+        )
+
+    def _save_snapshot_to_store(self, category: str, snapshot: TrendSnapshot) -> None:
+        if self._snapshot_collection is None:
+            return
+
+        document = {
+            'cache_key': self._snapshot_cache_key(category),
+            'category': category,
+            'geo': settings.trends_geo,
+            'provider': snapshot.provider,
+            'signal': snapshot.signal.model_dump(),
+            'timeline': [point.model_dump() for point in snapshot.timeline],
+            'keywords': [keyword.model_dump() for keyword in snapshot.keywords],
+            'fetched_at': self._to_utc_datetime(snapshot.fetched_at),
+            'updated_at': datetime.now(timezone.utc)
+        }
+
+        try:
+            self._snapshot_collection.update_one(
+                {'cache_key': document['cache_key']},
+                {'$set': document},
+                upsert=True
+            )
+        except Exception:
+            # Snapshot persistence is a cost optimization and should not fail requests.
+            return
 
     def _build_apify_snapshot(self, category: str) -> TrendSnapshot | None:
         if not settings.apify_api_token:
