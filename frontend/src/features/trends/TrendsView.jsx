@@ -57,11 +57,11 @@ function buildInsightNarrative(activeTrend) {
   );
 }
 
-function buildSourceList(activeTrend) {
+function buildSourceList(activeTrend, queryOverride = '') {
   const providerLabel = formatProvider(activeTrend.provider);
   return [
     `${providerLabel} timeline feed (${FULL_TIMELINE_MONTHS} months)`,
-    `${activeTrend.category} related query stream`,
+    queryOverride ? `"${queryOverride}" query trend stream` : `${activeTrend.category} related query stream`,
     `${activeTrend.region} regional interest heatmap`
   ];
 }
@@ -233,6 +233,10 @@ function computeSignalScore(trend) {
   return Math.round((growthScore + confidenceScore) / 2);
 }
 
+function normalizeAnalysisQuery(value) {
+  return String(value || '').trim().replace(/\s+/g, ' ').slice(0, 120);
+}
+
 export default function TrendsView({ selectedCatalogJobId = '' }) {
   const [marketTrends, setMarketTrends] = useState([]);
   const [risingKeywords, setRisingKeywords] = useState([]);
@@ -243,13 +247,34 @@ export default function TrendsView({ selectedCatalogJobId = '' }) {
   const [selectedWindow, setSelectedWindow] = useState('6M');
   const [selectedRegion, setSelectedRegion] = useState('All Regions');
   const [selectedCategory, setSelectedCategory] = useState('');
-  const [keywordQuery, setKeywordQuery] = useState('');
+  const [keywordFilter, setKeywordFilter] = useState('');
+  const [analysisQueryInput, setAnalysisQueryInput] = useState('');
+  const [analysisQuery, setAnalysisQuery] = useState('');
 
   useEffect(() => {
     setSelectedRegion('All Regions');
     setSelectedCategory('');
-    setKeywordQuery('');
+    setKeywordFilter('');
+    setAnalysisQueryInput('');
+    setAnalysisQuery('');
   }, [selectedCatalogJobId]);
+
+  const normalizedAnalysisInput = normalizeAnalysisQuery(analysisQueryInput);
+  const canApplyAnalysisQuery =
+    normalizedAnalysisInput.length >= 2 && normalizedAnalysisInput !== analysisQuery;
+
+  function applyAnalysisQuery() {
+    if (!canApplyAnalysisQuery) {
+      return;
+    }
+
+    setAnalysisQuery(normalizedAnalysisInput);
+  }
+
+  function clearAnalysisQuery() {
+    setAnalysisQuery('');
+    setAnalysisQueryInput('');
+  }
 
   useEffect(() => {
     let active = true;
@@ -258,7 +283,10 @@ export default function TrendsView({ selectedCatalogJobId = '' }) {
       try {
         setIsLoading(true);
         setError('');
-        const trendData = await listTrendSignals(selectedCatalogJobId);
+        const trendData = await listTrendSignals({
+          jobId: selectedCatalogJobId,
+          query: analysisQuery || undefined
+        });
 
         if (!active) {
           return;
@@ -267,7 +295,11 @@ export default function TrendsView({ selectedCatalogJobId = '' }) {
         if (!Array.isArray(trendData) || trendData.length === 0) {
           setMarketTrends([]);
           setSelectedCategory('');
-          setError('No live trend data was returned by providers.');
+          setError(
+            analysisQuery
+              ? `No live trend data was returned for "${analysisQuery}". Try a broader query.`
+              : 'No live trend data was returned by providers.'
+          );
           return;
         }
 
@@ -300,7 +332,7 @@ export default function TrendsView({ selectedCatalogJobId = '' }) {
     return () => {
       active = false;
     };
-  }, [selectedCatalogJobId]);
+  }, [selectedCatalogJobId, analysisQuery]);
 
   const regions = useMemo(() => {
     const available = marketTrends
@@ -355,8 +387,14 @@ export default function TrendsView({ selectedCatalogJobId = '' }) {
       try {
         setIsDetailLoading(true);
         const [keywords, timeline] = await Promise.all([
-          listTrendKeywords(activeTrend.category, 20, selectedCatalogJobId),
-          getTrendTimeline(activeTrend.category, FULL_TIMELINE_MONTHS, selectedCatalogJobId)
+          listTrendKeywords(activeTrend.category, 20, {
+            jobId: selectedCatalogJobId,
+            query: analysisQuery || undefined
+          }),
+          getTrendTimeline(activeTrend.category, FULL_TIMELINE_MONTHS, {
+            jobId: selectedCatalogJobId,
+            query: analysisQuery || undefined
+          })
         ]);
 
         if (!active) {
@@ -382,15 +420,15 @@ export default function TrendsView({ selectedCatalogJobId = '' }) {
     return () => {
       active = false;
     };
-  }, [activeTrend?.category, selectedCatalogJobId]);
+  }, [activeTrend?.category, selectedCatalogJobId, analysisQuery]);
 
   const filteredKeywords = useMemo(() => {
-    const normalizedQuery = keywordQuery.trim().toLowerCase();
+    const normalizedQuery = keywordFilter.trim().toLowerCase();
 
     return risingKeywords
       .filter((keyword) => keyword.term.toLowerCase().includes(normalizedQuery))
       .sort((left, right) => parseGrowthValue(right.growth) - parseGrowthValue(left.growth));
-  }, [keywordQuery, risingKeywords]);
+  }, [keywordFilter, risingKeywords]);
 
   const topKeyword = filteredKeywords[0];
 
@@ -448,7 +486,7 @@ export default function TrendsView({ selectedCatalogJobId = '' }) {
     filteredTrends.reduce((sum, trend) => sum + parseVolumeToK(trend.volume), 0)
   );
   const liveProvider = formatProvider(activeTrend.provider || marketTrends[0]?.provider);
-  const sourceList = buildSourceList(activeTrend);
+  const sourceList = buildSourceList(activeTrend, analysisQuery);
   const insightNarrative = buildInsightNarrative(activeTrend);
   const windowStartLabel = chartSeries[0]?.month || 'N/A';
   const windowEndLabel = chartSeries[chartSeries.length - 1]?.month || 'N/A';
@@ -502,35 +540,85 @@ export default function TrendsView({ selectedCatalogJobId = '' }) {
           ))}
         </div>
 
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-          <label className="relative block">
-            <Filter
-              size={12}
-              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#555555]"
-            />
-            <select
-              value={selectedRegion}
-              onChange={(event) => setSelectedRegion(event.target.value)}
-              className="confluxe-select w-full py-2 pl-8 pr-8 text-[10px] font-bold uppercase tracking-widest sm:w-44"
-            >
-              {regions.map((region) => (
-                <option key={region} value={region}>
-                  {region}
-                </option>
-              ))}
-            </select>
-          </label>
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <label className="relative block">
+              <Filter
+                size={12}
+                className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#555555]"
+              />
+              <select
+                value={selectedRegion}
+                onChange={(event) => setSelectedRegion(event.target.value)}
+                className="confluxe-select w-full py-2 pl-8 pr-8 text-[10px] font-bold uppercase tracking-widest sm:w-44"
+              >
+                {regions.map((region) => (
+                  <option key={region} value={region}>
+                    {region}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="relative block">
+              <Search size={12} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#888888]" />
+              <input
+                type="text"
+                value={analysisQueryInput}
+                onChange={(event) => setAnalysisQueryInput(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    applyAnalysisQuery();
+                  }
+                }}
+                placeholder="Analyze specific search query"
+                className="w-full border border-[#E5E2D9] py-2 pl-8 pr-3 text-xs text-[#111111] placeholder-[#888888] focus:border-[#111111] focus:outline-none sm:w-64"
+              />
+            </label>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={applyAnalysisQuery}
+                disabled={!canApplyAnalysisQuery}
+                className={`px-3 py-2 text-[10px] font-bold uppercase tracking-widest transition-colors ${
+                  canApplyAnalysisQuery
+                    ? 'bg-[#111111] text-white hover:bg-[#E32929]'
+                    : 'cursor-not-allowed bg-[#E5E2D9] text-[#888888]'
+                }`}
+              >
+                Apply Query
+              </button>
+
+              {analysisQuery && (
+                <button
+                  type="button"
+                  onClick={clearAnalysisQuery}
+                  className="border border-[#E5E2D9] px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-[#555555] transition-colors hover:border-[#111111] hover:text-[#111111]"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          </div>
 
           <label className="relative block">
             <Search size={12} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#888888]" />
             <input
               type="text"
-              value={keywordQuery}
-              onChange={(event) => setKeywordQuery(event.target.value)}
-              placeholder="Filter query terms"
-              className="w-full border border-[#E5E2D9] py-2 pl-8 pr-3 text-xs text-[#111111] placeholder-[#888888] focus:border-[#111111] focus:outline-none sm:w-56"
+              value={keywordFilter}
+              onChange={(event) => setKeywordFilter(event.target.value)}
+              placeholder="Filter returned query terms"
+              className="w-full border border-[#E5E2D9] py-2 pl-8 pr-3 text-xs text-[#111111] placeholder-[#888888] focus:border-[#111111] focus:outline-none sm:w-80"
             />
           </label>
+
+          {analysisQuery && (
+            <p className="text-[10px] font-bold uppercase tracking-widest text-[#555555]">
+              Custom Analysis Query: "{analysisQuery}"
+            </p>
+          )}
         </div>
       </div>
 
@@ -810,7 +898,7 @@ export default function TrendsView({ selectedCatalogJobId = '' }) {
               <div>
                 <h2 className="text-lg font-serif text-[#111111]">Search Interest Over Time</h2>
                 <p className="mt-1 text-[10px] font-bold uppercase tracking-widest text-[#888888]">
-                  Macro Indicator: {activeTrend.category}
+                  Macro Indicator: {analysisQuery ? `"${analysisQuery}"` : activeTrend.category}
                 </p>
                 <p className="mt-1 text-[9px] font-bold uppercase tracking-widest text-[#AAA29A]">
                   Window: {selectedWindow} ({windowStartLabel} to {windowEndLabel})

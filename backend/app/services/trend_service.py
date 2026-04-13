@@ -150,17 +150,31 @@ class TrendService:
             except Exception:
                 self._keyword_generation_chain = None
 
-    def get_trend_signal(self, category: str, job_id: str | None = None) -> TrendSignal:
-        snapshot = self._load_snapshot(category, allow_remote=True, job_id=job_id)
+    def get_trend_signal(
+        self,
+        category: str,
+        job_id: str | None = None,
+        query: str | None = None
+    ) -> TrendSignal:
+        snapshot = self._load_snapshot(category, allow_remote=True, job_id=job_id, query=query)
         return snapshot.signal
 
-    def get_macro_trends(self, job_id: str | None = None) -> list[TrendDashboardItem]:
+    def get_macro_trends(
+        self,
+        job_id: str | None = None,
+        category: str | None = None,
+        query: str | None = None
+    ) -> list[TrendDashboardItem]:
         items: list[TrendDashboardItem] = []
-        categories = self._resolve_trend_categories(job_id=job_id)
+        normalized_category = str(category or '').strip()
+        if normalized_category:
+            categories = [self._normalize_category(normalized_category)]
+        else:
+            categories = self._resolve_trend_categories(job_id=job_id)
 
         def load_category(category: str) -> TrendDashboardItem | None:
             try:
-                snapshot = self._load_snapshot(category, allow_remote=True, job_id=job_id)
+                snapshot = self._load_snapshot(category, allow_remote=True, job_id=job_id, query=query)
             except TrendDataUnavailableError:
                 return None
 
@@ -191,30 +205,34 @@ class TrendService:
         self,
         category: str,
         limit: int = 10,
-        job_id: str | None = None
+        job_id: str | None = None,
+        query: str | None = None
     ) -> list[TrendKeywordItem]:
-        snapshot = self._load_snapshot(category, allow_remote=True, job_id=job_id)
+        snapshot = self._load_snapshot(category, allow_remote=True, job_id=job_id, query=query)
         return snapshot.keywords[: max(1, min(50, limit))]
 
     def get_timeline(
         self,
         category: str,
         months: int = 12,
-        job_id: str | None = None
+        job_id: str | None = None,
+        query: str | None = None
     ) -> list[TrendTimelinePoint]:
-        snapshot = self._load_snapshot(category, allow_remote=True, job_id=job_id)
+        snapshot = self._load_snapshot(category, allow_remote=True, job_id=job_id, query=query)
         return snapshot.timeline[-max(1, min(12, months)) :]
 
     def _load_snapshot(
         self,
         category: str,
         allow_remote: bool = True,
-        job_id: str | None = None
+        job_id: str | None = None,
+        query: str | None = None
     ) -> TrendSnapshot:
         normalized_category = self._normalize_category(category)
         normalized_job_id = (job_id or '').strip()
+        normalized_query_override = self._normalize_external_query(query)
         preferred_region = self._resolve_catalog_region(normalized_category, job_id=normalized_job_id)
-        query_term = self._resolve_catalog_query(
+        query_term = normalized_query_override or self._resolve_catalog_query(
             normalized_category,
             preferred_region=preferred_region,
             job_id=normalized_job_id
@@ -293,6 +311,15 @@ class TrendService:
         raise TrendDataUnavailableError(
             f'Live trend data is unavailable for {normalized_category}. Check provider connectivity and credentials.'
         )
+
+    @staticmethod
+    def _normalize_external_query(query: str | None) -> str | None:
+        candidate = str(query or '').strip()
+        if len(candidate) < 2:
+            return None
+
+        normalized = re.sub(r'\s+', ' ', candidate)
+        return normalized[:120]
 
     def _resolve_trend_categories(self, job_id: str | None = None) -> list[str]:
         if self._records_collection is None:

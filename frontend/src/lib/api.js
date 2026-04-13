@@ -132,32 +132,44 @@ export async function listIntelligenceProducts({ action, category, jobId } = {})
   return request(`/intelligence/products${query ? `?${query}` : ''}`);
 }
 
-export async function listTrendSignals(jobId) {
+export async function listTrendSignals({ jobId, category, query } = {}) {
   const params = new URLSearchParams();
   if (jobId) {
     params.set('job_id', jobId);
   }
+  if (category) {
+    params.set('category', category);
+  }
+  if (query) {
+    params.set('query', query);
+  }
 
-  const query = params.toString();
-  return request(`/intelligence/trends${query ? `?${query}` : ''}`, {}, TREND_REQUEST_TIMEOUT_MS);
+  const queryString = params.toString();
+  return request(`/intelligence/trends${queryString ? `?${queryString}` : ''}`, {}, TREND_REQUEST_TIMEOUT_MS);
 }
 
-export async function listTrendKeywords(category, limit = 12, jobId) {
+export async function listTrendKeywords(category, limit = 12, { jobId, query } = {}) {
   const params = new URLSearchParams();
   params.set('category', category);
   params.set('limit', String(limit));
   if (jobId) {
     params.set('job_id', jobId);
   }
+  if (query) {
+    params.set('query', query);
+  }
   return request(`/intelligence/trends/keywords?${params.toString()}`, {}, TREND_REQUEST_TIMEOUT_MS);
 }
 
-export async function getTrendTimeline(category, months = 12, jobId) {
+export async function getTrendTimeline(category, months = 12, { jobId, query } = {}) {
   const params = new URLSearchParams();
   params.set('category', category);
   params.set('months', String(months));
   if (jobId) {
     params.set('job_id', jobId);
+  }
+  if (query) {
+    params.set('query', query);
   }
   return request(`/intelligence/trends/timeline?${params.toString()}`, {}, TREND_REQUEST_TIMEOUT_MS);
 }
