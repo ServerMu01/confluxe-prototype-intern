@@ -224,11 +224,12 @@ function parseGrowthValue(growth) {
     return 0;
   }
 
-  if (growth.toLowerCase() === 'breakout') {
+  const growthText = String(growth);
+  if (growthText.toLowerCase() === 'breakout') {
     return 150;
   }
 
-  const numericGrowth = Number(growth.replace(/[^0-9.-]/g, ''));
+  const numericGrowth = Number(growthText.replace(/[^0-9.-]/g, ''));
   return Number.isNaN(numericGrowth) ? 0 : numericGrowth;
 }
 
@@ -312,21 +313,29 @@ export default function TrendsView() {
   }, [marketTrends]);
 
   const filteredTrends = useMemo(() => {
-    if (selectedRegion === 'All Regions' || selectedRegion === 'All Over India') {
+    if (selectedRegion === 'All Regions') {
       return marketTrends;
     }
 
-    const exactMatches = marketTrends.filter((trend) => trend.region === selectedRegion);
-    return exactMatches.length > 0 ? exactMatches : marketTrends;
+    return marketTrends.filter((trend) => trend.region === selectedRegion);
   }, [marketTrends, selectedRegion]);
 
   const activeTrend = useMemo(() => {
+    if (filteredTrends.length === 0) {
+      return null;
+    }
+
     const selected = filteredTrends.find((trend) => trend.category === selectedCategory);
-    return selected ?? filteredTrends[0] ?? marketTrends[0];
-  }, [filteredTrends, marketTrends, selectedCategory]);
+    return selected ?? filteredTrends[0];
+  }, [filteredTrends, selectedCategory]);
 
   useEffect(() => {
-    if (filteredTrends.length > 0 && !filteredTrends.some((trend) => trend.category === selectedCategory)) {
+    if (filteredTrends.length === 0) {
+      setSelectedCategory('');
+      return;
+    }
+
+    if (!filteredTrends.some((trend) => trend.category === selectedCategory)) {
       setSelectedCategory(filteredTrends[0].category);
     }
   }, [filteredTrends, selectedCategory]);
@@ -402,11 +411,15 @@ export default function TrendsView() {
   }
 
   if (!activeTrend) {
+    const regionMessage = selectedRegion !== 'All Regions'
+      ? `No trend signals found for ${selectedRegion}.`
+      : 'No live trend data available for this selection.';
+
     return (
       <div className="max-w-[1400px] animate-in fade-in duration-500">
         <div className="border border-[#E5E2D9] bg-white p-8 text-center shadow-sm">
           <h2 className="font-serif text-xl text-[#111111]">Trend Signals</h2>
-          <p className="mt-2 text-sm text-[#555555]">{error || 'No live trend data available for this selection.'}</p>
+          <p className="mt-2 text-sm text-[#555555]">{error || regionMessage}</p>
         </div>
       </div>
     );

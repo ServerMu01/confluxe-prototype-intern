@@ -197,7 +197,8 @@ class TrendService:
 
     def _load_snapshot(self, category: str, allow_remote: bool = True) -> TrendSnapshot:
         normalized_category = self._normalize_category(category)
-        query_term = self._resolve_catalog_query(normalized_category)
+        preferred_region = self._resolve_catalog_region(normalized_category)
+        query_term = self._resolve_catalog_query(normalized_category, preferred_region=preferred_region)
         cache_key = self._snapshot_cache_key(normalized_category, query_term)
         now = datetime.now(timezone.utc)
         cached = self._cache.get(cache_key)
@@ -225,7 +226,11 @@ class TrendService:
                 self._build_google_news_rss_snapshot
             )
             for provider_builder in provider_chain:
-                snapshot = provider_builder(normalized_category, query=query_term)
+                snapshot = provider_builder(
+                    normalized_category,
+                    query=query_term,
+                    preferred_region=preferred_region
+                )
                 if snapshot:
                     break
 
@@ -282,7 +287,7 @@ class TrendService:
 
         return ordered[: self.MAX_TREND_CATEGORIES]
 
-    def _resolve_catalog_query(self, category: str) -> str:
+    def _resolve_catalog_query(self, category: str, preferred_region: str | None = None) -> str:
         default_query = self._category_terms.get(category, f'{category} india fashion')
         if self._records_collection is None:
             return default_query
@@ -333,6 +338,8 @@ class TrendService:
         if top_token and top_token.lower() not in top_brand.lower():
             query_parts.append(top_token)
         query_parts.append(category.lower())
+        if preferred_region and preferred_region != 'All Over India':
+            query_parts.append(preferred_region)
         query_parts.append('india')
 
         resolved = re.sub(r'\s+', ' ', ' '.join(part for part in query_parts if part)).strip()
@@ -340,6 +347,45 @@ class TrendService:
             return default_query
 
         return resolved[:120]
+
+    def _resolve_catalog_region(self, category: str) -> str | None:
+        if self._records_collection is None:
+            return None
+
+        try:
+            records = list(
+                self._records_collection.find(
+                    {
+                        'category': {
+                            '$regex': f'^{re.escape(category)}$',
+                            '$options': 'i'
+                        }
+                    },
+                    {'_id': 0, 'top_region': 1}
+                )
+                .sort('created_at', -1)
+                .limit(self.CATALOG_QUERY_SAMPLE_SIZE)
+            )
+        except Exception:
+            return None
+
+        if not records:
+            return None
+
+        region_counter: Counter[str] = Counter()
+        for record in records:
+            normalized_region = self._normalize_region(str(record.get('top_region') or '').strip())
+            if normalized_region:
+                region_counter[normalized_region] += 1
+
+        if not region_counter:
+            return None
+
+        for region_name, _ in region_counter.most_common():
+            if region_name != 'All Over India':
+                return region_name
+
+        return region_counter.most_common(1)[0][0]
 
     @staticmethod
     def _is_within_age(fetched_at: datetime, max_age_seconds: int, now: datetime | None = None) -> bool:
@@ -486,7 +532,12 @@ class TrendService:
             # Snapshot persistence is a cost optimization and should not fail requests.
             return
 
-    def _build_apify_snapshot(self, category: str, query: str | None = None) -> TrendSnapshot | None:
+    def _build_apify_snapshot(
+        self,
+        category: str,
+        query: str | None = None,
+        preferred_region: str | None = None
+    ) -> TrendSnapshot | None:
         if not settings.apify_api_token:
             return None
 
@@ -531,6 +582,7 @@ class TrendService:
             keywords = self._extract_apify_keywords(apify_items)
 
             signal = self._signal_from_timeline(category, timeline, top_region)
+            signal = self._apply_preferred_region(signal, preferred_region)
             if not keywords:
                 keywords = self._fallback_keywords(signal)
 
@@ -544,7 +596,12 @@ class TrendService:
         except Exception:
             return None
 
-    def _build_serpapi_snapshot(self, category: str, query: str | None = None) -> TrendSnapshot | None:
+    def _build_serpapi_snapshot(
+        self,
+        category: str,
+        query: str | None = None,
+        preferred_region: str | None = None
+    ) -> TrendSnapshot | None:
         if not settings.serpapi_api_key:
             return None
 
@@ -599,6 +656,7 @@ class TrendService:
         keywords = self._extract_apify_keywords([payload])
 
         signal = self._signal_from_timeline(category, timeline, top_region)
+        signal = self._apply_preferred_region(signal, preferred_region)
         if not keywords:
             keywords = self._fallback_keywords(signal)
 
@@ -610,7 +668,12 @@ class TrendService:
             fetched_at=datetime.now(timezone.utc)
         )
 
-    def _build_pytrends_snapshot(self, category: str, query: str | None = None) -> TrendSnapshot | None:
+    def _build_pytrends_snapshot(
+        self,
+        category: str,
+        query: str | None = None,
+        preferred_region: str | None = None
+    ) -> TrendSnapshot | None:
         query = str(query or self._category_terms.get(category, category)).strip()
 
         try:
@@ -641,6 +704,7 @@ class TrendService:
             keywords = self._extract_pytrends_keywords(client.related_queries(), query)
 
             signal = self._signal_from_timeline(category, timeline, top_region)
+            signal = self._apply_preferred_region(signal, preferred_region)
             if not keywords:
                 keywords = self._fallback_keywords(signal)
 
@@ -654,7 +718,12 @@ class TrendService:
         except Exception:
             return None
 
-    def _build_google_news_rss_snapshot(self, category: str, query: str | None = None) -> TrendSnapshot | None:
+    def _build_google_news_rss_snapshot(
+        self,
+        category: str,
+        query: str | None = None,
+        preferred_region: str | None = None
+    ) -> TrendSnapshot | None:
         query = str(query or self._category_news_terms.get(category, f'{category} india fashion')).strip()
 
         try:
@@ -684,12 +753,18 @@ class TrendService:
         now = datetime.now(timezone.utc)
         day_counter: Counter[Any] = Counter()
         keyword_counter: Counter[str] = Counter()
+        region_counter: Counter[str] = Counter()
 
         for item in items[:80]:
             raw_title = str(item.findtext('title') or '').strip()
             clean_title = self._clean_news_title(raw_title)
             if len(clean_title) < 3:
                 continue
+
+            full_text = ' '.join(text.strip() for text in item.itertext() if text and text.strip())
+            inferred_region = self._infer_region_from_text(full_text)
+            if inferred_region:
+                region_counter[inferred_region] += 1
 
             parsed_date = self._parse_rfc822_date(str(item.findtext('pubDate') or '').strip())
             if not parsed_date:
@@ -718,7 +793,9 @@ class TrendService:
                 )
             )
 
-        signal = self._signal_from_timeline(category, timeline, 'All Over India')
+        top_region = region_counter.most_common(1)[0][0] if region_counter else (preferred_region or 'All Over India')
+        signal = self._signal_from_timeline(category, timeline, top_region)
+        signal = self._apply_preferred_region(signal, preferred_region)
 
         max_frequency = keyword_counter.most_common(1)[0][1]
         keywords: list[TrendKeywordItem] = []
@@ -1128,6 +1205,43 @@ class TrendService:
                 cleaned = cleaned.split(separator)[0].strip()
 
         return re.sub(r'\s+', ' ', cleaned).strip()
+
+    @classmethod
+    def _apply_preferred_region(cls, signal: TrendSignal, preferred_region: str | None) -> TrendSignal:
+        if not preferred_region:
+            return signal
+
+        normalized_preferred = cls._normalize_region(preferred_region)
+        if signal.top_region != 'All Over India' or normalized_preferred == 'All Over India':
+            return signal
+
+        return TrendSignal(
+            category=signal.category,
+            search_volume=signal.search_volume,
+            growth_percentage=signal.growth_percentage,
+            momentum_score=signal.momentum_score,
+            top_region=normalized_preferred
+        )
+
+    @classmethod
+    def _infer_region_from_text(cls, text: str) -> str | None:
+        candidate = str(text or '').lower().strip()
+        if not candidate:
+            return None
+
+        city_names = sorted(cls.TIER_ONE_CITIES, key=len, reverse=True)
+        for city in city_names:
+            city_pattern = rf'\b{re.escape(city.lower())}\b'
+            if re.search(city_pattern, candidate):
+                return city
+
+        alias_keys = sorted(cls.REGION_ALIAS_MAP.keys(), key=len, reverse=True)
+        for alias in alias_keys:
+            alias_pattern = rf'\b{re.escape(alias)}\b'
+            if re.search(alias_pattern, candidate):
+                return cls.REGION_ALIAS_MAP[alias]
+
+        return None
 
     @staticmethod
     def _normalize_category(category: str) -> str:
